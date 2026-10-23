@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 — 2026-10-24（Disney+ SDK 26.13対応・フルHD復旧）
+
+- Disney+の再生SDKが `26.10.0-jasmine` から `26.13.3-mbaku` に更新され、フルHDモードが再生前に停止していた問題を修正。1080p系のモードとSDK診断は26.13.3も受け入れる。4K系は26.10.0固定のままで、新SDKでは再生前に停止する。
+- Disney+のサーバー設定がEdgeの鍵システムを `WIDEVINE` に固定するようになったため、PlayReady系モードはSDK設定で `drmKeySystem: "PLAYREADY"` を指定する。
+- 単一候補モードは、26.13で追加されたDRM事前確認（再生前の追加ライセンス要求）を無効にし、従来のEdgeと同じ流れで再生する。
+- 前提条件を変更。Widevineは無効にせず既定のままにする。無効にすると拡張OFF時の通常再生がエラーコード83になる。
+- 実機確認: AMD Radeon RX 9070・通常Edge 157で、フルHDモードが1920×1080 SDR（HEVC、PlayReady recommendation.3000）を約60〜110秒再生。フレームは約24fpsで進行し、追加dropなし。Widevine有効/無効の両方で確認。拡張OFFはWidevine有効時に720pで再生。5分以上の連続再生と拡張形式での確認は未実施（Tampermonkeyで同じソースを読み込んで確認）。
+
 ## 0.5.1 — 2026-09-13（名称変更）
 
 - 公開名を **Disney+ 4KHDR Enhanced**、リポジトリ名を `disney-plus-4khdr-enhanced` に変更。

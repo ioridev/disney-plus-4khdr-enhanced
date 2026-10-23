@@ -3,7 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const source = fs.readFileSync(new URL("../extension/DisneyPlus-Edge-Enhanced.user.js", import.meta.url), "utf8");
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 const MODE = "1080p-hevc-single-sdr";
 const PROBE_MODE = "4k-hevc-sdr-manifest-probe";
 const HDR10_PROBE_MODE = "4k-hdr10-sdr-manifest-probe";
@@ -136,6 +136,7 @@ function createRuntime({
   outerFetch = false,
   outerFetchMode = "delegate",
   fetchProperty = "normal",
+  sdkVersion = SDK_VERSION,
 } = {}) {
   const callbacks = new Map();
   const timers = new Map();
@@ -348,7 +349,7 @@ function createRuntime({
   }
 
   class PlaybackService {
-    static get version() { return SDK_VERSION; }
+    static get version() { return sdkVersion; }
     createPlaybackSession(...args) {
       sdkCalls.push({thisValue: this, args});
       return runtime.sdkPromise;
@@ -484,6 +485,9 @@ async function createSdk(runtime) {
     `SDK configMax${expectedHeight} is applied`);
   assert.deepEqual(hive.session.vod.playbackAttributesConfig.resolution.max, [expectedResolution]);
   assert.equal(hive.engine.drmPlayReadyRecommendationFlow, true, "SDK PlayReady recommendation is enabled");
+  assert.equal(hive.engine.drmKeySystem, "PLAYREADY", "PlayReady overrides a server-pinned Widevine key system");
+  assert.equal(hive.session.enableDrmPreflightCheck, false,
+    "single-variant modes keep the pre-26.13 Edge default without a DRM preflight challenge");
   assert.deepEqual(json(runtime.context.sdkInput), makeSdkOptions(), "source SDK options remain unchanged");
   if (isProbeMode(runtime.mode)) {
     const sessionResult = runtime.run(
@@ -1395,5 +1399,29 @@ await runNormalMode();
     'late errors from a retired page cannot disarm the next page');
 }
 
-console.log('Normal full-HD: no duration cap, repeated SDK/POST/master and native key updates, fatal error disarm, page retirement and BFCache passed (mock only).');
-console.log("single-variant runtime: normal-mode identity, v0.5.1 FHD 1080 and HEVC/HDR10 UHD SDR probe 2160 SDK config/recommendation, PlaybackSession UHD policy, one POST/SDK cap, fetch/XHR text+arraybuffer probe rejection, native EME/session arguments, and fail-closed generateRequest gates passed");
+// SDK 26.13.3 is accepted for the 1080p service override only; the flow is the
+// same mocked sequence as 26.10.0, not a real CDM playback result.
+{
+  const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.13.3-mbaku'});
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  await publishAndCreate(runtime);
+  await sendPlayback(runtime);
+  await fetchMasterAndMedia(runtime);
+  await prepareSession(runtime);
+  assert.equal(control.getState().failed, false, 'full-HD runs on the re-checked 26.13.3 service SDK');
+  assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'fullhd',
+    'the 26.13.3 service SDK does not disarm full-HD');
+}
+{
+  const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.99.0-unknown'});
+  runtime.publishSdk();
+  runtime.run(`globalThis.sdkInput = ${JSON.stringify(makeSdkOptions())}; globalThis.sdkMarker = {marker: "sdk"};`);
+  await runtime.run("new globalThis['playback-service'].PlaybackService().createPlaybackSession(sdkInput, sdkMarker)");
+  assert.equal(runtime.sdkCalls[0].args[0], runtime.context.sdkInput, 'an unverified service SDK is not rewritten');
+  await assert.rejects(
+    runtime.run(`fetch(${JSON.stringify(PLAYBACK_URL)}, {method:'POST', body:${JSON.stringify(makePlaybackBody())}})`),
+    (error) => error.name === 'AbortError', 'an unverified service SDK still blocks the full-HD playback POST');
+}
+
+console.log('Normal full-HD: no duration cap, repeated SDK/POST/master and native key updates, fatal error disarm, page retirement, BFCache and SDK 26.13.3 acceptance passed (mock only).');
+console.log("single-variant runtime: normal-mode identity, v0.5.2 FHD 1080 and HEVC/HDR10 UHD SDR probe 2160 SDK config/recommendation, PlaybackSession UHD policy, one POST/SDK cap, fetch/XHR text+arraybuffer probe rejection, native EME/session arguments, and fail-closed generateRequest gates passed");

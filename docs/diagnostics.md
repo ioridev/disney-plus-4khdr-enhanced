@@ -2,6 +2,21 @@
 
 2026-09-13更新。公開できる項目だけを実験記録から要約しています。作品・アカウント・ホスト名・生の通信やトレースは含めていません。各節の日付・版は、その試験時点のものです。
 
+## SDK 26.13でのフルHD復旧（2026-10-24、v0.5.2）
+
+Disney+の再生SDKが `26.13.3-mbaku`（sessionは `26.13.2-mbaku`）に更新された。あわせて、Edge向けのサーバー設定が `drmKeySystem: "WIDEVINE"`、720p上限になった。旧版はSDK版の一致を条件にしていたため、フルHDの上書きを適用できず停止していた。Widevineを無効にした環境では、拡張OFFでもDisney+のエラーコード83になる。
+
+v0.5.2の実機確認（AMD Radeon RX 9070、通常Edge 157、Windows Insider build 29683、同じソースをTampermonkeyで読み込み）:
+
+| 条件 | DRM | 映像 | 約60秒の進行 |
+| --- | --- | --- | --- |
+| フルHD・Widevine無効 | PlayReady recommendation.3000 / persistent-license | 1920×1080 SDR HEVC | 27.59→97.65秒、128→1797フレーム、追加drop 0 |
+| フルHD・Widevine有効 | PlayReady recommendation.3000 / persistent-license | 1920×1080 SDR HEVC | 71.90→131.95秒、1247→2686フレーム、drop 0 |
+| 拡張OFF・Widevine有効 | Widevine（ソフトウェア）/ temporary | 最大1280×720 AVC | 30.71→90.71秒、261→1700フレーム、drop 0 |
+| 拡張OFF・Widevine無効 | — | — | CDM未接続のままエラーコード83 |
+
+5分以上の連続再生、作品全編、拡張形式での確認は未実施。dGPUの対応範囲（1080p SDRまで）は変更していない。Intel向け4Kモードは新SDKで未検証で、再生前に停止する。
+
 ## 追加確認: Intel外部出力で4K・HDRオンも5分以上（2026-09-12）
 
 同じ外部MPG 491C OLEDで、NVIDIA側の端子では出力保護エラー、Intel側の端子へ差し替えた後は4K継続再生に成功しました。EdgeをIntel描画に指定するだけでは、NVIDIA側の端子でのエラーは解消しませんでした。

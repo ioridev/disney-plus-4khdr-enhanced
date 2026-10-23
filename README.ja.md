@@ -18,12 +18,15 @@ Windows版Microsoft EdgeでDisney+の画質要求（フルHD / Intel向け4K）�
 
 検証機のIntel Iris Xe構成では約5分間の4K HDR再生を確認していますが、全Intel製品や全dGPUでの動作を保証するものではありません。dGPUの上限はGPU自体の性能限界ではなく本拡張の対応範囲です。詳細な数値や未確認項目の検証履歴は [docs/intel-4k.md](docs/intel-4k.md)、[docs/diagnostics.md](docs/diagnostics.md)、[docs/related-issues.md](docs/related-issues.md) を参照してください。
 
+> [!NOTE]
+> **Disney+の再生SDK更新（2026年10月）:** v0.5.2で、SDK 26.13上のフルHDモードを復旧しました。Intel向け4Kモードは新SDKで未検証のため、再生前に停止します。
+
 ## 前提条件（Edgeの設定）
 
 本拡張の動作条件を揃えるための設定です。Disney+公式の手順ではありません。フラグの有無はEdgeのバージョンで異なり、他サービスにも影響するため、元の値を控えて戻せるようにしてください。
 
 1. `edge://flags` で **PlayReady DRM** を **Enabled** に設定する。
-2. `edge://flags` で **Widevine DRM** を **Disabled** に設定する（他サービスへの影響に注意）。
+2. **Widevine DRM** は既定（**Enabled**）のままにする。2026年10月以降、Disney+はEdgeの通常再生にWidevine（720pまで）を使うため、無効にすると拡張OFF時の再生がエラーコード83になる。フルHDモードは拡張側でPlayReadyを選択する。
 3. Edgeの設定「システムとパフォーマンス」で **グラフィックス／ハードウェアアクセラレーション** をオンにする。
 4. **Edge本体を再起動** する。
 5. Windowsで **HEVCビデオ拡張機能** が利用可能か確認する。

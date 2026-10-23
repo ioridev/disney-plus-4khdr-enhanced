@@ -8,7 +8,8 @@ const NATIVE_CAP_MODE = '1080p-hevc-native-cap';
 const PLAYREADY_MODE = '1080p-hevc-sdk-playready';
 const UHD_PLAYREADY_MODE = '4k-hdr10-sdk-playready';
 const SDK_VERSION = '26.10.0-jasmine';
-const SCRIPT_VERSION = '0.5.1';
+const FHD_ONLY_SDK_VERSION = '26.13.3-mbaku';
+const SCRIPT_VERSION = '0.5.2';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const OLD_MODES = [
   '1080p-hevc-hw-persistent',
@@ -224,6 +225,26 @@ assert.deepEqual(fromRealmJson(planRealm, `(() => {
 }, 'copy-on-write preserves unrelated nested objects');
 
 {
+  const SINGLE_VARIANT_MODES = ['fullhd', '1080p-hevc-single-sdr', '4k-hdr10-single-pq', '4k-hevc-sdr-manifest-probe', '4k-hdr10-sdr-manifest-probe'];
+  for (const mode of ALL_MODES) {
+    const planned = fromRealmJson(planRealm, `(() => {
+      const options = makeSdkOptions();
+      const before = JSON.stringify(options);
+      const result = __DP4K_INTERNALS__.planPlaybackSessionOptions(options, ${JSON.stringify(mode)});
+      const session = result.options.clientParameters?.configOverrides?.['hive-dmp']?.session;
+      return {
+        sourceUnchanged: JSON.stringify(options) === before,
+        preflight: session && Object.prototype.hasOwnProperty.call(session, 'enableDrmPreflightCheck')
+          ? session.enableDrmPreflightCheck : 'absent',
+      };
+    })()`);
+    assert.equal(planned.sourceUnchanged, true, `${mode}: preflight override is copy-on-write`);
+    assert.equal(planned.preflight, SINGLE_VARIANT_MODES.includes(mode) ? false : 'absent',
+      `${mode}: only single-variant modes disable the SDK 26.13 DRM preflight`);
+  }
+}
+
+{
   vm.runInContext('globalThis.nativeCapOptions = makeSdkOptions()', planRealm);
   const before = fromRealmJson(planRealm, 'JSON.stringify(nativeCapOptions)');
   const result = vm.runInContext(
@@ -295,7 +316,7 @@ assert.deepEqual(fromRealmJson(planRealm, `(() => {
     overridesCopied: true,
     hiveCopied: true,
     engineCopied: true,
-    engine: {keep: 'engine-override', drmPlayReadyRecommendationFlow: true},
+    engine: {keep: 'engine-override', drmPlayReadyRecommendationFlow: true, drmKeySystem: 'PLAYREADY'},
     sessionCopied: true,
     vodCopied: true,
     filteringCopied: true,
@@ -327,10 +348,11 @@ assert.deepEqual(fromRealmJson(planRealm, `(() => {
   const expectedSnapshot = JSON.parse(before);
   const hive = expectedSnapshot.clientParameters.configOverrides['hive-dmp'];
   hive.engine.drmPlayReadyRecommendationFlow = true;
+  hive.engine.drmKeySystem = 'PLAYREADY';
   hive.session.vod.playlistFiltering.maxHeight = 2160;
   hive.session.vod.playbackAttributesConfig.resolution.max = ['3840x2160'];
   assert.deepEqual(plannedSnapshot, expectedSnapshot,
-    'UHD SDK PlayReady changes exactly the two VOD values and engine recommendation flag');
+    'UHD SDK PlayReady changes exactly the two VOD values and the engine flow/key-system pair');
   assert.deepEqual(fromRealmJson(planRealm, `(() => {
     const original = uhdPlayReadyOptions.clientParameters.configOverrides['hive-dmp'];
     const next = __DP4K_INTERNALS__.planPlaybackSessionOptions(uhdPlayReadyOptions, ${JSON.stringify(UHD_PLAYREADY_MODE)}).options;
@@ -363,7 +385,7 @@ assert.deepEqual(fromRealmJson(planRealm, `(() => {
     filteringCopied: true,
     attributesCopied: true,
     resolutionCopied: true,
-    engine: {keep: 'engine-override', drmPlayReadyRecommendationFlow: true},
+    engine: {keep: 'engine-override', drmPlayReadyRecommendationFlow: true, drmKeySystem: 'PLAYREADY'},
     adsPreserved: true,
     livePreserved: true,
     blockListPreserved: true,
@@ -784,7 +806,7 @@ assert.deepEqual(sdkPlayReadyCall, {
   nativeThis: true,
   markerSame: true,
   optionsCopied: true,
-  engine: {runtimeKeep: true, drmPlayReadyRecommendationFlow: true},
+  engine: {runtimeKeep: true, drmPlayReadyRecommendationFlow: true, drmKeySystem: 'PLAYREADY'},
   maxHeight: 1080,
   resolutionMax: ['1920x1080'],
 }, 'SDK PlayReady wrapper preserves native call shape and applies the engine/VOD overrides');
@@ -855,7 +877,7 @@ assert.deepEqual(uhdSdkPlayReadyCall, {
   markerSame: true,
   thirdArgumentPreserved: true,
   optionsCopied: true,
-  engine: {runtimeKeep: true, drmPlayReadyRecommendationFlow: true},
+  engine: {runtimeKeep: true, drmPlayReadyRecommendationFlow: true, drmKeySystem: 'PLAYREADY'},
   maxHeight: 2160,
   resolutionMax: ['3840x2160'],
   sessionCount: 1,
@@ -1139,6 +1161,30 @@ const wrongVersion = createRuntime({preloadSdk: true, sdkVersion: '26.10.0-other
 assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', wrongVersion.context), true,
   'unsupported SDK version is not patched');
 await assertUnappliedTrafficIsBlocked(wrongVersion);
+
+for (const mode of [SDK_MODE, NATIVE_CAP_MODE, PLAYREADY_MODE]) {
+  const runtime = createRuntime({preloadSdk: true, mode, sdkVersion: FHD_ONLY_SDK_VERSION});
+  assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession !== sdkNativeCreate', runtime.context), true,
+    `${mode}: the re-checked ${FHD_ONLY_SDK_VERSION} service SDK is patched for the 1080p override`);
+  const call = fromRealmJson(runtime.context, `(() => {
+    const returned = sdkInstance.createPlaybackSession(makeRuntimeOptions());
+    const hive = sdkCalls.at(-1).args[0].clientParameters.configOverrides['hive-dmp'];
+    return {
+      promiseSame: returned === sdkExpectedPromise,
+      maxHeight: hive.session.vod.playlistFiltering.maxHeight,
+      preflight: Object.prototype.hasOwnProperty.call(hive.session, 'enableDrmPreflightCheck'),
+    };
+  })()`);
+  assert.deepEqual(call, {promiseSame: true, maxHeight: 1080, preflight: false},
+    `${mode}: ${FHD_ONLY_SDK_VERSION} receives the same VOD cap and keeps the SDK preflight default`);
+  await vm.runInContext(`fetch(${JSON.stringify(PLAYBACK_URL)}, {method:'POST', body:${JSON.stringify(PLAYBACK_BODY)}})`, runtime.context);
+  assert.equal(vm.runInContext('nativeFetchCalls.length', runtime.context), 1,
+    `${mode}: playback POST continues after the ${FHD_ONLY_SDK_VERSION} override is applied`);
+}
+const uhdFhdOnlySdk = createRuntime({preloadSdk: true, mode: UHD_PLAYREADY_MODE, sdkVersion: FHD_ONLY_SDK_VERSION});
+assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', uhdFhdOnlySdk.context), true,
+  `UHD mode stays pinned to ${SDK_VERSION} and does not patch ${FHD_ONLY_SDK_VERSION}`);
+await assertUnappliedTrafficIsBlocked(uhdFhdOnlySdk);
 
 const missingSdk = createRuntime();
 await assertUnappliedTrafficIsBlocked(missingSdk);

@@ -18,12 +18,15 @@ An unofficial extension for Microsoft Edge on Windows that toggles Disney+ strea
 
 Approximately 5 minutes of continuous 4K HDR playback was verified on a test machine with Intel Iris Xe, but operation is not guaranteed across all Intel products or all dGPUs. The limit for dGPUs reflects this extension's supported scope, not the hardware's inherent capability. For specific test measurements and validation history, see [docs/intel-4k.md](docs/intel-4k.md) (Japanese), [docs/diagnostics.md](docs/diagnostics.md) (Japanese), and [docs/related-issues.md](docs/related-issues.md) (Japanese).
 
+> [!NOTE]
+> **Disney+ player update (October 2026):** v0.5.2 restores the Full HD mode on Disney+ player SDK 26.13. The Intel 4K mode has not been re-verified on the new SDK yet and stops before playback.
+
 ## Prerequisites (Edge Settings)
 
 These settings align the environment with the extension's operating requirements. They are not official Disney+ instructions. The availability of flags varies by Edge version, and changing them affects other services; keep track of the original values so you can revert them.
 
 1. Set **PlayReady DRM** to **Enabled** in `edge://flags`.
-2. Set **Widevine DRM** to **Disabled** in `edge://flags` (note the impact on other services).
+2. Leave **Widevine DRM** at its default (**Enabled**). Since October 2026 Disney+ assigns Widevine (up to 720p) to Edge for normal playback, so disabling it makes playback with the extension OFF fail with error code 83. The Full HD mode selects PlayReady by itself.
 3. Turn on **Use graphics acceleration when available** (hardware acceleration) under Edge Settings > "System and performance".
 4. **Restart Edge**.
 5. Verify that the **HEVC Video Extensions** are available on Windows.

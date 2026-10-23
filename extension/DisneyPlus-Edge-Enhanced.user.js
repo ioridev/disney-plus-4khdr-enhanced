@@ -5,7 +5,7 @@
 // @homepageURL  https://github.com/ioridev/disney-plus-4khdr-enhanced
 // @supportURL   https://github.com/ioridev/disney-plus-4khdr-enhanced/issues
 // @license      MIT
-// @version      0.5.1
+// @version      0.5.2
 // @description  Full-HD request mode and optional playback diagnostics for Disney+ on Windows Edge. Alt+Shift+4 opens the panel. Does not bypass DRM.
 // @description:ja Disney+のフルHD要求モードと任意表示の再生診断。Alt+Shift+4でパネルを開閉します。DRMは回避しません。
 // @match        https://www.disneyplus.com/*
@@ -18,9 +18,9 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.5.1";
+  const VERSION = "0.5.2";
   const STORAGE_KEY = "ioridev.disneyplus4k.mode.v1";
-  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.1";
+  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.2";
   const CHECKPOINT_KEY = "ioridev.disneyplus4k.checkpoint.v1";
   const DEFAULT_MODE = "original";
   const DEBUG_UI_KEY = "ioridev.disneyplus.debug-ui.v1";
@@ -54,6 +54,10 @@
   const SDK_KEY_CONFIGURATION_UNKNOWN = "unknown";
   const SDK_KEY_CONFIGURATION_ABSENT = "absent";
   const SUPPORTED_PLAYBACK_SDK = "26.10.0-jasmine";
+  // Service SDKs whose createPlaybackSession and clientParameters.configOverrides
+  // ["hive-dmp"] merge were statically re-checked for the 1080p override path.
+  // The UHD session constructor hook stays pinned to SUPPORTED_PLAYBACK_SDK.
+  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku"]);
   const MUTABLE_SCENARIOS = new Set([
     "ctr-regular",
     "ctr-high",
@@ -1715,9 +1719,19 @@ function createSingleVariantNetworkAdapter({
       if (plan.sdkRecommendationFlow) {
         const engine = copyRecord(hive.engine);
         engine.drmPlayReadyRecommendationFlow = true;
+        // Server config (PCS hive-dmp, Oct 2026) pins Edge to drmKeySystem
+        // "WIDEVINE"; the SDK key-system picker then rejects PlayReady outright.
+        engine.drmKeySystem = "PLAYREADY";
         hive.engine = engine;
       }
       const session = copyRecord(hive.session);
+      if (plan.singleFhdVariant || plan.singleHdrVariant || plan.singleSdrProbe) {
+        // SDK 26.13 enables a Windows Edge DRM preflight: a separate MediaKeys
+        // generateRequest before the playback POST. Single-variant modes reject
+        // any challenge before the master is accepted, so keep the pre-26.13
+        // Edge default. License-side security checks are unaffected.
+        session.enableDrmPreflightCheck = false;
+      }
       const vod = copyRecord(session.vod);
       const filtering = copyRecord(vod.playlistFiltering);
       const attributes = copyRecord(vod.playbackAttributesConfig);
@@ -2834,7 +2848,10 @@ function createSingleVariantNetworkAdapter({
     const patchExport = (exported) => {
       try {
         const Service = exported?.PlaybackService;
-        if (typeof Service !== "function" || Service.version !== SUPPORTED_PLAYBACK_SDK) {
+        const supported = typeof Service === "function" && (getModePlan(state.mode).sdkUhdPolicy
+          ? Service.version === SUPPORTED_PLAYBACK_SDK
+          : FHD_PLAYBACK_SDKS.has(Service.version));
+        if (!supported) {
           state.sdkConfigStatus = "対応SDKを確認できず、内部上限は未変更";
           renderOverlay();
           return;

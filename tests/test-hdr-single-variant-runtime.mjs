@@ -7,7 +7,7 @@ import vm from "node:vm";
 // native fetch/XHR, SDK, EME, and session shims used by that test, without a
 // browser, network, or real CDM.
 const source = fs.readFileSync(new URL("../extension/DisneyPlus-Edge-Enhanced.user.js", import.meta.url), "utf8");
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 const MODE = "4k-hdr10-single-pq";
 const SDK_VERSION = "26.10.0-jasmine";
 const DOCUMENT_URL = "https://www.disneyplus.com/ja-jp/play/hdr-single-variant-runtime-test";
@@ -531,6 +531,7 @@ async function createSdk(runtime) {
   assert.deepEqual(hive.session.vod.playbackAttributesConfig.resolution.max, ["3840x2160"]);
   assert.equal(hive.engine.drmPlayReadyRecommendationFlow, true,
     "HDR SDK PlayReady recommendation flow is enabled");
+  assert.equal(hive.engine.drmKeySystem, "PLAYREADY", "HDR SDK key system is pinned to PlayReady");
   assert.deepEqual(json(runtime.context.sdkInput), makeSdkOptions(), "source SDK options remain unchanged");
 
   const sessionResult = runtime.run(
