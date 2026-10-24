@@ -1412,6 +1412,27 @@ await runNormalMode();
   assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'fullhd',
     'the 26.13.3 service SDK does not disarm full-HD');
 }
+// Disney+ may wrap window.Request in a forwarding Proxy after document start.
+{
+  const runtime = createRuntime({mode: 'fullhd'});
+  runtime.run('globalThis.Request = new Proxy(globalThis.Request, {construct(target, args, newTarget) { return Reflect.construct(target, args, newTarget); }});');
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  await publishAndCreate(runtime);
+  await sendPlayback(runtime);
+  await fetchMasterAndMedia(runtime);
+  await prepareSession(runtime);
+  assert.equal(control.getState().failed, false, 'a forwarding Request wrapper does not trip the pre-install guard');
+}
+{
+  const runtime = createRuntime({mode: 'fullhd'});
+  runtime.run('globalThis.Request = class SubstituteRequest { constructor(input) { this.url = String(input); } };');
+  runtime.publishSdk();
+  runtime.run(`globalThis.sdkInput = ${JSON.stringify(makeSdkOptions())}; globalThis.sdkMarker = {marker: "sdk"};`);
+  await assert.rejects(
+    runtime.run("new globalThis['playback-service'].PlaybackService().createPlaybackSession(sdkInput, sdkMarker)"),
+    (error) => error.name === 'AbortError', 'a substitute Request class still fails closed');
+  assert.equal(runtime.sdkCalls.length, 0, 'a substitute Request class never reaches native SDK create');
+}
 {
   const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.99.0-unknown'});
   runtime.publishSdk();

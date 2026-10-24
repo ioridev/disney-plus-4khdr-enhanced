@@ -2552,7 +2552,7 @@ function createSingleVariantNetworkAdapter({
     // final transport boundary only once, immediately before native SDK create,
     // preserving that wrapper rather than silently treating it as equivalent.
     // EME and the pre-SDK playback POST gate have been active since document-start.
-    if (globalThis.XMLHttpRequest !== NativeXhr || globalThis.Request !== NativeRequest || !singleVariantEmeGuard
+    if (globalThis.XMLHttpRequest !== NativeXhr || !isNativeRequestOrForwardingWrapper(globalThis.Request) || !singleVariantEmeGuard
       || Object.getOwnPropertyDescriptor(globalThis.MediaKeySession?.prototype, "generateRequest")?.value !== singleVariantEmeGuard
       || !isEmeIdentifierGuardActive()) {
       throw singleVariantAbort("sdk-preinstall-guard");
@@ -3098,6 +3098,17 @@ function createSingleVariantNetworkAdapter({
   }
 
   const NativeRequest = globalThis.Request;
+  // Disney+ pages may wrap window.Request in a forwarding Proxy (a first-party
+  // script, observed 2026-10-24). The adapter only constructs NativeRequest, so
+  // accept a wrapper that still exposes the native prototype without invoking
+  // it; a substitute class with another prototype still fails closed.
+  function isNativeRequestOrForwardingWrapper(value) {
+    if (value === NativeRequest) return true;
+    try {
+      return typeof value === "function" && typeof NativeRequest === "function"
+        && value.prototype === NativeRequest.prototype;
+    } catch (_) { return false; }
+  }
   function installFetchObserver() {
     const nativeFetch = globalThis.fetch;
     if (typeof nativeFetch !== "function") return false;
