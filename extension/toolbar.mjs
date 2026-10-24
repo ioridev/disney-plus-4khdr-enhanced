@@ -26,8 +26,8 @@ export function applyPageCommand(command) {
       // next reload. Do not inject another copy into an old playback session.
       const key = 'ioridev.disneyplus4k.mode.v1';
       const mode = localStorage.getItem(key) === 'fullhd' ? 'original' : 'fullhd';
-      sessionStorage.removeItem('ioridev.disneyplus4k.once.v0.5.2');
-      if (sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.2') !== null) return { ok: false };
+      sessionStorage.removeItem('ioridev.disneyplus4k.once.v0.5.3');
+      if (sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.3') !== null) return { ok: false };
       localStorage.setItem(key, mode);
       return { ok: localStorage.getItem(key) === mode, reload: true, mode };
     }

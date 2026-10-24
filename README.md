@@ -19,7 +19,7 @@ An unofficial extension for Microsoft Edge on Windows that toggles Disney+ strea
 Approximately 5 minutes of continuous 4K HDR playback was verified on a test machine with Intel Iris Xe, but operation is not guaranteed across all Intel products or all dGPUs. The limit for dGPUs reflects this extension's supported scope, not the hardware's inherent capability. For specific test measurements and validation history, see [docs/intel-4k.md](docs/intel-4k.md) (Japanese), [docs/diagnostics.md](docs/diagnostics.md) (Japanese), and [docs/related-issues.md](docs/related-issues.md) (Japanese).
 
 > [!NOTE]
-> **Disney+ player update (October 2026):** v0.5.2 restores the Full HD mode on Disney+ player SDK 26.13. The Intel 4K mode has not been re-verified on the new SDK yet and stops before playback.
+> **Disney+ player update (October 2026):** v0.5.2 restored the Full HD mode on Disney+ player SDK 26.13, and v0.5.3 fixes a startup guard that could still stop it with error code 83. The Intel 4K mode has not been re-verified on the new SDK yet and stops before playback.
 
 ## Prerequisites (Edge Settings)
 

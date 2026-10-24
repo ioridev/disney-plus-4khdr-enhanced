@@ -5,7 +5,7 @@
 // @homepageURL  https://github.com/ioridev/disney-plus-4khdr-enhanced
 // @supportURL   https://github.com/ioridev/disney-plus-4khdr-enhanced/issues
 // @license      MIT
-// @version      0.5.2
+// @version      0.5.3
 // @description  Full-HD request mode and optional playback diagnostics for Disney+ on Windows Edge. Alt+Shift+4 opens the panel. Does not bypass DRM.
 // @description:ja Disney+のフルHD要求モードと任意表示の再生診断。Alt+Shift+4でパネルを開閉します。DRMは回避しません。
 // @match        https://www.disneyplus.com/*
@@ -18,9 +18,9 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.5.2";
+  const VERSION = "0.5.3";
   const STORAGE_KEY = "ioridev.disneyplus4k.mode.v1";
-  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.2";
+  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.3";
   const CHECKPOINT_KEY = "ioridev.disneyplus4k.checkpoint.v1";
   const DEFAULT_MODE = "original";
   const DEBUG_UI_KEY = "ioridev.disneyplus.debug-ui.v1";
