@@ -41,6 +41,17 @@ These settings align the environment with the extension's operating requirements
 * Do not run this concurrently with other video quality scripts or extensions.
 * When updating, overwrite the entire directory, click the reload button for this extension on `edge://extensions`, and reload the Disney+ tab.
 
+### Tampermonkey (userscript)
+
+The same code is also available as a userscript. It has no toolbar icon: open the settings panel with the small button in the bottom-right corner of Disney+ or with `Alt+Shift+4`. The prerequisites above apply as well.
+
+1. Install [Tampermonkey](https://www.tampermonkey.net/) in Edge. If Tampermonkey asks for it, turn on **Allow user scripts** (or **Developer mode** on older Edge versions) for Tampermonkey in `edge://extensions`.
+2. Open the [install link](https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js) and click **Install** in Tampermonkey.
+3. Reload the Disney+ page.
+
+* Tampermonkey checks the same link for updates and installs new versions automatically.
+* Use either the extension or the userscript, not both: disable the one you do not use.
+
 ## Usage
 
 - **Left-click icon**: Toggles the Full HD request ON/OFF and reloads the active tab.

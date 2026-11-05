@@ -57,6 +57,12 @@ assert.match(source, /\/\/ @name:ja\s+Disney\+ 4KHDR Enhanced\n/);
 assert.match(source, /\/\/ @namespace\s+https:\/\/github\.com\/ioridev\/disney-plus-edge-enhanced\n/, 'legacy userscript namespace stays an identifier');
 assert.match(source, /\/\/ @homepageURL\s+https:\/\/github\.com\/ioridev\/disney-plus-4khdr-enhanced\n/);
 assert.match(source, /\/\/ @supportURL\s+https:\/\/github\.com\/ioridev\/disney-plus-4khdr-enhanced\/issues\n/);
+const userscriptUrl = 'https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js';
+for (const key of ['downloadURL', 'updateURL']) {
+  const line = source.split('\n').find((value) => value.startsWith(`// @${key} `));
+  assert.equal(line?.split(/\s+/)[2], userscriptUrl, `@${key} points at the userscript on main`);
+}
+for (const name of ['README.md', 'README.ja.md']) assert.ok(read(name).includes(`](${userscriptUrl})`), `${name}: Tampermonkey install link`);
 for (const stableIdentifier of ['ioridev.disneyplus4k.mode.v1', 'ioridev.disneyplus4k.checkpoint.v1', 'ioridev.disneyplus.debug-ui.v1', '__DisneyPlusEdgeEnhancedToolbar', '__ioridevDisneyPlus4kEdgeV1']) {
   assert.ok(source.includes(`"${stableIdentifier}"`), `branding keeps ${stableIdentifier} compatible`);
 }

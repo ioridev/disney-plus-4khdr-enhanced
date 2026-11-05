@@ -41,6 +41,17 @@ Windows版Microsoft EdgeでDisney+の画質要求（フルHD / Intel向け4K）�
 ※ 他の画質変更スクリプトや拡張機能と重複して有効化しないでください。
 ※ 更新時はフォルダー全体を上書きし、`edge://extensions` で対象拡張の再読み込みボタンを押し、Disney+のタブも再読み込みしてください。
 
+### Tampermonkey（ユーザースクリプト）で使う
+
+同じ処理をユーザースクリプトとしても配布しています。ツールバーのアイコンはないため、設定パネルはDisney+の画面右下の小さいボタンか `Alt+Shift+4` で開きます。上記の前提条件も同じです。
+
+1. Edgeに [Tampermonkey](https://www.tampermonkey.net/) を入れる。Tampermonkeyから求められた場合は、`edge://extensions` でTampermonkeyの **ユーザースクリプトを許可**（古いEdgeでは **開発者モード**）をオンにする。
+2. [インストール用リンク](https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js) を開き、Tampermonkeyの画面で **インストール** を押す。
+3. Disney+のページを再読み込みする。
+
+※ Tampermonkeyが同じリンクを定期的に確認し、新しい版を自動で更新します。
+※ 拡張機能版とユーザースクリプト版は、どちらか一方だけを有効にしてください。
+
 ## 使い方
 
 - **アイコン左クリック**: フルHD要求のON/OFFを切り替え、対象タブを再読み込みします。
