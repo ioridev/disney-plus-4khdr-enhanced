@@ -9,7 +9,7 @@ const SDK_MODE = process.argv[2] ?? MODE_HDR10;
 assert.ok([MODE_HDR10, MODE_SDR].includes(SDK_MODE),
   `usage: node tests/test-sdk-resolution-policy.mjs <${MODE_HDR10}|${MODE_SDR}>`);
 const SDK_VERSION = '26.10.0-jasmine';
-const SCRIPT_VERSION = '0.5.4';
+const SCRIPT_VERSION = '0.5.5';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const DOCUMENT_URL = 'https://www.disneyplus.com/ja-jp/play/sdk-resolution-policy-test';
 const PLAYBACK_SCENARIO = SDK_MODE === MODE_HDR10 ? 'tv-drm-ctr-h265-hdr10-atmos' : 'tv-drm-ctr-h265-atmos';
@@ -715,8 +715,18 @@ for (const sessionKind of ['accessor', 'data']) {
 
 {
   const runtime = createRuntime({sessionKind: 'accessor', documentElement: true});
-  assert.equal(runtime.overlayEvents.has('.check:click'), false, 'debug UI is hidden until explicitly opened');
+  const panel = runtime.overlayNodes.get('.panel');
+  const launcher = runtime.overlayNodes.get('.launcher');
+  assert.equal(panel.hidden, true, 'the panel stays closed until explicitly opened');
+  assert.equal(launcher.hidden, false, 'only the small reopen button is shown at startup');
   vm.runInContext('__DisneyPlusEdgeEnhancedToolbar.toggleDebug()', runtime.context);
+  assert.deepEqual([panel.hidden, launcher.hidden], [false, true], 'opening the panel hides the reopen button');
+  runtime.overlayEvents.get('.collapse:click')();
+  assert.deepEqual([panel.hidden, launcher.hidden], [true, false], 'closing leaves the reopen button');
+  assert.equal(runtime.sessionStorage.getItem('ioridev.disneyplus.debug-ui.v1'), '0');
+  runtime.overlayEvents.get('.launcher:click')();
+  assert.deepEqual([panel.hidden, launcher.hidden], [false, true], 'the reopen button opens the panel');
+  assert.equal(runtime.context.__DisneyPlusEdgeEnhancedToolbar.getState().debugVisible, true);
   assert.equal(runtime.overlayEvents.has('.check:click'), true, 'overlay check button is available in the fake document');
   runtime.overlayEvents.get('.check:click')();
   await Promise.resolve();

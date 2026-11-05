@@ -47,7 +47,7 @@ These settings align the environment with the extension's operating requirements
 - **Initial state**: Until you toggle it for the first time, the extension starts with the Full HD request ON. Once you turn it OFF, it stays OFF. If Full HD playback fails, the next page load starts OFF.
 - **Right-click icon**: Select "Start 4K (for Intel GPUs, this page only)" or "Show/Hide Settings Panel" (`Alt+Shift+4` can also toggle the panel).
 - **Language**: The settings panel, toolbar tooltips and menu follow the browser language: Japanese for Japanese, English otherwise. The collapsed 開発者向け診断 (developer diagnostics) section stays in Japanese.
-- **Settings panel**: Switch between "Full HD (recommended)" and "OFF (Disney+ default)", see the resolution of the video that is playing, and use "Copy diagnostics" for bug reports. Diagnostic modes and detailed logs are in the collapsed 開発者向け診断 (developer diagnostics) section.
+- **Settings panel**: Switch between "Full HD (recommended)" and "OFF (Disney+ default)", see the resolution of the video that is playing, and use "Copy diagnostics" for bug reports. Diagnostic modes and detailed logs are in the collapsed 開発者向け診断 (developer diagnostics) section. When you close the panel, a small button showing the current state (for example "HD ▲") stays in the bottom-right corner; click it to reopen the panel. On the player it sits above the Disney+ control bar and hides after 3 seconds without mouse movement.
 - **4K mode behavior**: The 4K request is active for the current page only and reverts to OFF upon reload. The extension uses WebGL to detect the GPU, but this does not guarantee physical video output routing.
 
 | Badge | State |

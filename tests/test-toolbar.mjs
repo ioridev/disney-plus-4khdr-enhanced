@@ -36,7 +36,7 @@ const runCommand = (context, command) => vm.runInContext(`(${applyPageCommand.to
   assert.equal(context.sessionStorage.getItem('ioridev.disneyplus.debug-ui.v1'), '1');
   assert.equal(runCommand(context, 'arbitrary-code').ok, false);
   assert.equal(runCommand(context, 'start-intel-4k').reason, 'reload-required');
-  assert.equal(context.sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.4'), null, 'missing/older helpers cannot arm an unchecked 4K ticket');
+  assert.equal(context.sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.5'), null, 'missing/older helpers cannot arm an unchecked 4K ticket');
   context.localStorage.setItem = () => {};
   assert.equal(runCommand(context, 'toggle-fullhd').ok, false, 'silent storage failure does not report ON');
   const foreign = makePage('https://example.test/');

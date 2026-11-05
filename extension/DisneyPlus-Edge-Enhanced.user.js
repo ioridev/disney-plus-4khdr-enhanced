@@ -5,7 +5,7 @@
 // @homepageURL  https://github.com/ioridev/disney-plus-4khdr-enhanced
 // @supportURL   https://github.com/ioridev/disney-plus-4khdr-enhanced/issues
 // @license      MIT
-// @version      0.5.4
+// @version      0.5.5
 // @description  Full-HD request mode and optional playback diagnostics for Disney+ on Windows Edge. Alt+Shift+4 opens the panel. Does not bypass DRM.
 // @description:ja Disney+のフルHD要求モードと任意表示の再生診断。Alt+Shift+4でパネルを開閉します。DRMは回避しません。
 // @match        https://www.disneyplus.com/*
@@ -18,9 +18,9 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.5.4";
+  const VERSION = "0.5.5";
   const STORAGE_KEY = "ioridev.disneyplus4k.mode.v1";
-  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.4";
+  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.5";
   const CHECKPOINT_KEY = "ioridev.disneyplus4k.checkpoint.v1";
   const DEFAULT_MODE = "original";
   // Used only while no request mode has been saved. A saved "original" (OFF,
@@ -3832,6 +3832,7 @@ function createSingleVariantNetworkAdapter({
   // Everyday panel: Full HD / OFF only. Diagnostic modes stay in the collapsed
   // developer section.
   const USER_MODES = Object.freeze(["fullhd", DEFAULT_MODE]);
+  const LAUNCHER_IDLE_MS = 3000;
 
   // The everyday panel follows the browser language: Japanese for ja, English
   // otherwise. The developer section stays Japanese.
@@ -3844,6 +3845,7 @@ function createSingleVariantNetworkAdapter({
   const PANEL_TEXT = Object.freeze({
     ja: Object.freeze({
       close: "閉じる", closeTitle: "Alt+Shift+4でも開閉",
+      open: "パネルを開く", openTitle: "Disney+ 4KHDR Enhanced（Alt+Shift+4でも開閉）",
       label: "画質の要求（切り替えるとページを再読み込みします）", group: "画質の要求",
       fullhd: "フルHD（推奨）", original: "OFF（Disney+標準）", video: "再生中の映像",
       copy: "診断をコピー", copyTitle: "不具合の報告用に、診断情報をクリップボードへコピーします", copied: "コピー済み", copyFailed: "コピー失敗",
@@ -3864,6 +3866,7 @@ function createSingleVariantNetworkAdapter({
     }),
     en: Object.freeze({
       close: "Close", closeTitle: "Alt+Shift+4 also opens and closes this panel",
+      open: "Open panel", openTitle: "Disney+ 4KHDR Enhanced (Alt+Shift+4 also toggles)",
       label: "Quality request (switching reloads the page)", group: "Quality request",
       fullhd: "Full HD (recommended)", original: "OFF (Disney+ default)", video: "Video playing",
       copy: "Copy diagnostics", copyTitle: "Copy diagnostic information to the clipboard for a bug report", copied: "Copied", copyFailed: "Copy failed",
@@ -3936,6 +3939,8 @@ function createSingleVariantNetworkAdapter({
     const badge = userBadge(actual4k);
     elements.badge.textContent = badge.text;
     elements.badge.dataset.tone = badge.tone;
+    elements.launcherMode.textContent = badge.text;
+    state.overlay.launcher.dataset.tone = badge.tone;
     elements.summary.textContent = describeUserMode();
     for (const choice of elements.choices) {
       choice.setAttribute("aria-checked", String(choice.dataset.mode === state.mode));
@@ -4009,57 +4014,66 @@ function createSingleVariantNetworkAdapter({
   }
 
   function mountOverlay() {
-    if (state.overlay || !state.debugVisible || !document.documentElement) return;
+    if (state.overlay || !document.documentElement) return;
 
     const host = document.createElement("div");
     host.id = "ioridev-disneyplus-4k-verifier";
-    host.style.cssText = "position:fixed;right:14px;bottom:14px;z-index:2147483647;font-family:Segoe UI,system-ui,sans-serif;color-scheme:dark;";
+    host.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;color-scheme:dark;display:flex;flex-direction:column;align-items:flex-end;";
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
       <style>
         :host { all: initial; }
-        .panel { width: min(430px, calc(100vw - 28px)); box-sizing: border-box; color: #f7f7fa; background: rgba(12,14,22,.94); border: 1px solid rgba(255,255,255,.16); border-radius: 14px; box-shadow: 0 14px 42px rgba(0,0,0,.48); overflow: hidden; backdrop-filter: blur(14px); font: 12px/1.45 "Segoe UI", system-ui, sans-serif; }
-        .head { display:flex; align-items:center; gap:9px; padding:10px 11px; background:rgba(255,255,255,.055); }
-        .badge { width:34px; height:30px; border-radius:9px; display:grid; place-items:center; font-size:11px; font-weight:800; background:#5c6274; color:white; }
-        .badge[data-tone="on"] { background:#1769e0; }
-        .badge[data-tone="ok"] { background:#00a86b; }
-        .badge[data-tone="error"] { background:#b42318; }
-        .badge[data-tone="debug"] { background:#946200; }
+        [hidden] { display:none !important; }
+        .panel, .launcher { font-family: var(--ump-font-regular, Inspire), "Segoe UI", system-ui, sans-serif; color:#f9f9f9; -webkit-font-smoothing:antialiased; }
+        .launcher { display:flex; align-items:center; gap:7px; height:34px; padding:0 14px 0 12px; border-radius:100px; border:1px solid rgba(249,249,249,.2); background:rgba(14,14,18,.78); box-shadow:0 8px 24px rgba(0,0,0,.45); backdrop-filter:blur(12px); cursor:pointer; font-size:12px; font-weight:700; letter-spacing:.08em; transition:opacity .3s ease, background-color .15s ease, transform .15s ease; }
+        .launcher:hover, .launcher:focus-visible { background:rgba(48,49,56,.92); transform:translateY(-1px); outline:none; }
+        .launcher[data-tone="error"] { border-color:#e5484d; }
+        .launcher[data-idle="true"] { opacity:0; pointer-events:none; }
+        .launcher-arrow { font-size:9px; opacity:.8; }
+        .panel { width:min(400px, calc(100vw - 32px)); box-sizing:border-box; background:rgba(23,23,27,.96); border:1px solid rgba(249,249,249,.1); border-radius:12px; box-shadow:0 24px 48px rgba(0,0,0,.6); overflow:hidden; backdrop-filter:blur(16px); font-size:14px; line-height:1.5; }
+        .head { display:flex; align-items:center; gap:10px; padding:14px 14px 10px 16px; }
+        .badge { min-width:22px; height:20px; padding:0 6px; box-sizing:border-box; border-radius:4px; border:1px solid rgba(249,249,249,.45); display:grid; place-items:center; font-size:11px; font-weight:700; letter-spacing:.06em; color:rgba(249,249,249,.8); }
+        .badge[data-tone="on"] { background:#f9f9f9; border-color:#f9f9f9; color:#0e0e12; }
+        .badge[data-tone="ok"] { background:#1fb56a; border-color:#1fb56a; color:#fff; }
+        .badge[data-tone="error"] { background:#e5484d; border-color:#e5484d; color:#fff; }
+        .badge[data-tone="debug"] { border-color:#f5b041; color:#f5b041; }
         .title { min-width:0; flex:1; }
-        .title strong { display:block; font-size:13px; letter-spacing:.01em; }
-        .title span { color:#aeb5c8; }
-        button, select { font:inherit; color:inherit; border:1px solid rgba(255,255,255,.17); background:#262a38; border-radius:8px; }
-        button { cursor:pointer; padding:5px 8px; }
-        button:hover, select:hover { background:#323747; }
-        .body { padding:11px; max-height:70vh; overflow:auto; }
-        .mode { width:100%; padding:7px 8px; margin-bottom:9px; }
-        dl { margin:0; display:grid; grid-template-columns:84px minmax(0,1fr); gap:5px 8px; }
-        dt { color:#9ea6ba; }
+        .title strong { display:block; font-size:15px; font-weight:700; letter-spacing:.01em; }
+        .title span { display:block; font-size:12px; color:#a8a9ad; }
+        button, select { font:inherit; color:inherit; }
+        button { cursor:pointer; }
+        .collapse { width:32px; height:32px; flex:none; padding:0; border:0; border-radius:50%; background:rgba(249,249,249,.1); font-size:18px; line-height:1; display:grid; place-items:center; }
+        .collapse:hover, .collapse:focus-visible { background:rgba(249,249,249,.2); outline:none; }
+        .body { padding:4px 16px 16px; max-height:70vh; overflow:auto; }
+        .label { margin:0 0 8px; font-size:12px; color:#a8a9ad; }
+        .choices { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; margin-bottom:12px; border-radius:100px; background:rgba(249,249,249,.08); }
+        .choice { padding:9px 10px; border:0; border-radius:100px; background:transparent; font-size:13px; font-weight:700; letter-spacing:.02em; text-align:center; transition:background-color .15s ease, color .15s ease; }
+        .choice:hover { background:rgba(249,249,249,.12); }
+        .choice[aria-checked="true"] { background:#f9f9f9; color:#0e0e12; }
+        .choice:disabled { cursor:default; opacity:.6; }
+        .status { margin:0 0 12px; font-size:13px; color:#dbdcde; }
+        dl { margin:0; display:grid; grid-template-columns:92px minmax(0,1fr); gap:6px 10px; font-size:13px; }
+        dt { color:#a8a9ad; }
         dd { margin:0; min-width:0; overflow-wrap:anywhere; }
-        .note { margin:9px 0 0; color:#cbd2e4; }
-        .guard { margin:0 0 9px; color:#ffd999; }
-        .error { margin:8px 0 0; padding:7px 8px; border-radius:8px; color:#ffd5d5; background:rgba(210,55,55,.18); }
-        .actions { display:flex; justify-content:flex-end; gap:7px; margin-top:9px; }
-        details { margin-top:9px; } summary { cursor:pointer; } pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
-        .label { margin:0 0 6px; color:#9ea6ba; }
-        .choices { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:9px; }
-        .choice { padding:8px 6px; text-align:center; }
-        .choice[aria-checked="true"] { background:#1769e0; border-color:#1769e0; font-weight:700; }
-        .choice:disabled { cursor:default; opacity:.7; }
-        .status { margin:0 0 9px; color:#e3e8f4; }
-        .dev { border-top:1px solid rgba(255,255,255,.12); padding-top:8px; }
-        .dev > summary { color:#9ea6ba; }
-        .dev-body { margin-top:9px; }
-        .collapsed .body, .collapsed .title span, .collapsed .title strong { display:none; }
-        .collapsed { width:auto; }
-        .collapsed .head { padding:7px; }
-        .collapsed .title { display:none; }
+        .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+        .copy, .check { padding:6px 14px; border:1px solid rgba(249,249,249,.28); border-radius:100px; background:transparent; font-size:12px; font-weight:700; letter-spacing:.04em; }
+        .copy:hover, .check:hover { background:rgba(249,249,249,.1); }
+        details { margin-top:12px; } summary { cursor:pointer; font-size:12px; color:#a8a9ad; }
+        pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+        .dev { border-top:1px solid rgba(249,249,249,.1); padding-top:10px; }
+        .dev-body { margin-top:10px; font-size:12px; }
+        .dev-body dl { font-size:12px; }
+        .mode { width:100%; padding:7px 10px; margin-bottom:10px; border:1px solid rgba(249,249,249,.2); border-radius:8px; background:#26262c; }
+        .note { margin:10px 0 0; color:#cacbcf; }
+        .guard { margin:0 0 10px; color:#f5c46b; }
+        .error { margin:8px 0 0; padding:8px 10px; border-radius:8px; color:#ffd5d5; background:rgba(229,72,77,.18); }
       </style>
+      <button class="launcher" type="button" aria-label="${UI_TEXT.open}" title="${UI_TEXT.openTitle}"><span class="launcher-mode"></span><span class="launcher-arrow" aria-hidden="true">▲</span></button>
       <section class="panel" aria-label="Disney+ 4KHDR Enhanced">
         <div class="head">
           <span class="badge">?</span>
           <span class="title"><strong>Disney+ 4KHDR Enhanced v${VERSION}</strong><span class="summary"></span></span>
-          <button class="collapse" type="button" title="${UI_TEXT.closeTitle}">${UI_TEXT.close}</button>
+          <button class="collapse" type="button" aria-label="${UI_TEXT.close}" title="${UI_TEXT.closeTitle}">×</button>
         </div>
         <div class="body">
           <p class="label">${UI_TEXT.label}</p>
@@ -4118,7 +4132,9 @@ function createSingleVariantNetworkAdapter({
 
     document.documentElement.appendChild(host);
     const panel = shadow.querySelector(".panel");
+    const launcher = shadow.querySelector(".launcher");
     const elements = {
+      launcherMode: shadow.querySelector(".launcher-mode"),
       badge: shadow.querySelector(".badge"),
       summary: shadow.querySelector(".summary"),
       choices: [...shadow.querySelectorAll(".choice")],
@@ -4138,7 +4154,7 @@ function createSingleVariantNetworkAdapter({
       environment: shadow.querySelector(".environment"),
       trace: shadow.querySelector(".trace"),
     };
-    state.overlay = { host, shadow, panel, elements };
+    state.overlay = { host, shadow, panel, launcher, elements };
     shadow.querySelector(".check").addEventListener("click", () => {
       state.environment = "チェック中…";
       renderOverlay();
@@ -4151,6 +4167,20 @@ function createSingleVariantNetworkAdapter({
     shadow.querySelector(".collapse").addEventListener("click", () => {
       setDebugVisibility(false);
     });
+    launcher.addEventListener("click", () => setDebugVisibility(true));
+
+    // On the player, sit above Disney+'s control bar and hide the reopen
+    // button with the controls when the pointer is idle.
+    let idleTimer = null;
+    const wake = () => safelyObserve(() => {
+      const onPlayer = /\/play\//.test(location.pathname);
+      host.style.bottom = onPlayer ? "112px" : "16px";
+      launcher.dataset.idle = "false";
+      if (idleTimer !== null) clearTimeout(idleTimer);
+      idleTimer = onPlayer ? setTimeout(() => { launcher.dataset.idle = "true"; }, LAUNCHER_IDLE_MS) : null;
+    });
+    for (const type of ["mousemove", "pointerdown", "keydown", "touchstart"]) addEventListener(type, wake, { capture: true, passive: true });
+    wake();
 
     const switchMode = (selected) => {
       if (state.modeReloadPending) return;
@@ -4195,7 +4225,14 @@ function createSingleVariantNetworkAdapter({
       setTimeout(() => { copyButton.textContent = UI_TEXT.copy; }, 1400);
     });
 
+    applyPanelVisibility();
     renderOverlay();
+  }
+
+  function applyPanelVisibility() {
+    if (!state.overlay) return;
+    state.overlay.panel.hidden = !state.debugVisible;
+    state.overlay.launcher.hidden = state.debugVisible;
   }
 
   function toolbarState() {
@@ -4215,8 +4252,8 @@ function createSingleVariantNetworkAdapter({
   function setDebugVisibility(visible) {
     state.debugVisible = Boolean(visible);
     safelyObserve(() => sessionStorage.setItem(DEBUG_UI_KEY, state.debugVisible ? "1" : "0"));
-    if (state.debugVisible) mountOverlay();
-    if (state.overlay) state.overlay.host.hidden = !state.debugVisible;
+    mountOverlay();
+    applyPanelVisibility();
     publishToolbarState();
     return toolbarState();
   }

@@ -1,6 +1,6 @@
 {
   "name": "disney-plus-4khdr-enhanced",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
   "description": "Disney+ full-HD toggle, Intel-gated 4K selection and diagnostics for Windows Edge. Five-minute 4K playback observed on one Intel iGPU laptop.",
   "type": "module",
