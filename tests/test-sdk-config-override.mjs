@@ -8,8 +8,8 @@ const NATIVE_CAP_MODE = '1080p-hevc-native-cap';
 const PLAYREADY_MODE = '1080p-hevc-sdk-playready';
 const UHD_PLAYREADY_MODE = '4k-hdr10-sdk-playready';
 const SDK_VERSION = '26.10.0-jasmine';
-const FHD_ONLY_SDK_VERSION = '26.13.3-mbaku';
-const SCRIPT_VERSION = '0.5.3';
+const FHD_ONLY_SDK_VERSIONS = ['26.13.3-mbaku', '26.14.2-nala'];
+const SCRIPT_VERSION = '0.5.4';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const OLD_MODES = [
   '1080p-hevc-hw-persistent',
@@ -1162,7 +1162,7 @@ assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSe
   'unsupported SDK version is not patched');
 await assertUnappliedTrafficIsBlocked(wrongVersion);
 
-for (const mode of [SDK_MODE, NATIVE_CAP_MODE, PLAYREADY_MODE]) {
+for (const FHD_ONLY_SDK_VERSION of FHD_ONLY_SDK_VERSIONS) for (const mode of [SDK_MODE, NATIVE_CAP_MODE, PLAYREADY_MODE]) {
   const runtime = createRuntime({preloadSdk: true, mode, sdkVersion: FHD_ONLY_SDK_VERSION});
   assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession !== sdkNativeCreate', runtime.context), true,
     `${mode}: the re-checked ${FHD_ONLY_SDK_VERSION} service SDK is patched for the 1080p override`);
@@ -1181,10 +1181,12 @@ for (const mode of [SDK_MODE, NATIVE_CAP_MODE, PLAYREADY_MODE]) {
   assert.equal(vm.runInContext('nativeFetchCalls.length', runtime.context), 1,
     `${mode}: playback POST continues after the ${FHD_ONLY_SDK_VERSION} override is applied`);
 }
-const uhdFhdOnlySdk = createRuntime({preloadSdk: true, mode: UHD_PLAYREADY_MODE, sdkVersion: FHD_ONLY_SDK_VERSION});
-assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', uhdFhdOnlySdk.context), true,
-  `UHD mode stays pinned to ${SDK_VERSION} and does not patch ${FHD_ONLY_SDK_VERSION}`);
-await assertUnappliedTrafficIsBlocked(uhdFhdOnlySdk);
+for (const FHD_ONLY_SDK_VERSION of FHD_ONLY_SDK_VERSIONS) {
+  const uhdFhdOnlySdk = createRuntime({preloadSdk: true, mode: UHD_PLAYREADY_MODE, sdkVersion: FHD_ONLY_SDK_VERSION});
+  assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', uhdFhdOnlySdk.context), true,
+    `UHD mode stays pinned to ${SDK_VERSION} and does not patch ${FHD_ONLY_SDK_VERSION}`);
+  await assertUnappliedTrafficIsBlocked(uhdFhdOnlySdk);
+}
 
 const missingSdk = createRuntime();
 await assertUnappliedTrafficIsBlocked(missingSdk);

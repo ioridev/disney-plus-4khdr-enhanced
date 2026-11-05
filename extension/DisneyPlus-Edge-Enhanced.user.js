@@ -5,7 +5,7 @@
 // @homepageURL  https://github.com/ioridev/disney-plus-4khdr-enhanced
 // @supportURL   https://github.com/ioridev/disney-plus-4khdr-enhanced/issues
 // @license      MIT
-// @version      0.5.3
+// @version      0.5.4
 // @description  Full-HD request mode and optional playback diagnostics for Disney+ on Windows Edge. Alt+Shift+4 opens the panel. Does not bypass DRM.
 // @description:ja Disney+のフルHD要求モードと任意表示の再生診断。Alt+Shift+4でパネルを開閉します。DRMは回避しません。
 // @match        https://www.disneyplus.com/*
@@ -18,11 +18,14 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.5.3";
+  const VERSION = "0.5.4";
   const STORAGE_KEY = "ioridev.disneyplus4k.mode.v1";
-  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.3";
+  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.4";
   const CHECKPOINT_KEY = "ioridev.disneyplus4k.checkpoint.v1";
   const DEFAULT_MODE = "original";
+  // Used only while no request mode has been saved. A saved "original" (OFF,
+  // or written after a failed full-HD session) is kept as it is.
+  const UNSET_MODE = "fullhd";
   const DEBUG_UI_KEY = "ioridev.disneyplus.debug-ui.v1";
   const TOOLBAR_CONTROL = "__DisneyPlusEdgeEnhancedToolbar";
   const INTEL_4K_MODE = "4k-hdr10-sdk-playready";
@@ -57,7 +60,7 @@
   // Service SDKs whose createPlaybackSession and clientParameters.configOverrides
   // ["hive-dmp"] merge were statically re-checked for the 1080p override path.
   // The UHD session constructor hook stays pinned to SUPPORTED_PLAYBACK_SDK.
-  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku"]);
+  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku", "26.14.2-nala"]);
   const MUTABLE_SCENARIOS = new Set([
     "ctr-regular",
     "ctr-high",
@@ -1849,7 +1852,8 @@ function createSingleVariantNetworkAdapter({
       clearTestTicket(sessionStore);
       const stored = localStore.getItem(STORAGE_KEY);
       let notice = "HW/HDR/SDK実験は選択後の1ページ限り。再読込後は無変更に戻ります。";
-      let mode = Object.prototype.hasOwnProperty.call(MODE_PLANS, stored) ? stored : DEFAULT_MODE;
+      let mode = stored === null ? UNSET_MODE
+        : Object.prototype.hasOwnProperty.call(MODE_PLANS, stored) ? stored : DEFAULT_MODE;
       if (isExperimentalMode(mode)) {
         storeMode(localStore, DEFAULT_MODE);
         mode = DEFAULT_MODE;
@@ -2417,6 +2421,7 @@ function createSingleVariantNetworkAdapter({
   const state = {
     mode: startup.mode,
     guardNotice: startup.notice,
+    switchNotice: "",
     modeReloadPending: false,
     retiredDocument: false,
     previousCheckpoint: null,
@@ -2503,9 +2508,11 @@ function createSingleVariantNetworkAdapter({
     if (getModePlan(state.mode).continuousFhd && !state.retiredDocument) {
       // Do not automatically re-arm a failed full-HD session on the next load.
       // A late callback from a departed page must not clear the preference
-      // that the next page is already using.
+      // that the next page is already using. An unsaved preference also starts
+      // full-HD, so it is disarmed the same way.
       safelyObserve(() => {
-        if (localStorage.getItem(STORAGE_KEY) === "fullhd") storeMode(localStorage, DEFAULT_MODE);
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored === "fullhd" || stored === null) storeMode(localStorage, DEFAULT_MODE);
       });
     }
     // A fixed classification only. Never retain the manifest, URL, or native
@@ -3822,6 +3829,98 @@ function createSingleVariantNetworkAdapter({
     publishToolbarState();
   }
 
+  // Everyday panel: Full HD / OFF only. Diagnostic modes stay in the collapsed
+  // developer section.
+  const USER_MODES = Object.freeze(["fullhd", DEFAULT_MODE]);
+
+  // The everyday panel follows the browser language: Japanese for ja, English
+  // otherwise. The developer section stays Japanese.
+  const UI_LANGUAGE = (() => {
+    try {
+      const language = String(navigator.languages?.[0] || navigator.language || "");
+      return !language || /^ja(?:-|$)/i.test(language) ? "ja" : "en";
+    } catch (_) { return "ja"; }
+  })();
+  const PANEL_TEXT = Object.freeze({
+    ja: Object.freeze({
+      close: "閉じる", closeTitle: "Alt+Shift+4でも開閉",
+      label: "画質の要求（切り替えるとページを再読み込みします）", group: "画質の要求",
+      fullhd: "フルHD（推奨）", original: "OFF（Disney+標準）", video: "再生中の映像",
+      copy: "診断をコピー", copyTitle: "不具合の報告用に、診断情報をクリップボードへコピーします", copied: "コピー済み", copyFailed: "コピー失敗",
+      dev: "開発者向け診断（通常は使いません）",
+      switching: "切り替え中…", fullhdOn: "フルHD要求 ON", off: "OFF（Disney+標準）", intel4k: "Intel向け4K要求（このページのみ）",
+      diagnosticOnce: "診断モード（このページのみ）", diagnostic: "診断モード",
+      reloading: "設定を保存しました。ページを再読み込みします。",
+      fullhdFailed: "フルHDの準備で問題が見つかったため、再生を止めました。次の読み込みからOFFで起動します。もう一度試すときは「フルHD」を選んでください。",
+      stopped: "再生を止めました。詳細は「開発者向け診断」で確認できます。",
+      fullhdSelected: "1920×1080の映像を選びました。実際の解像度は下の「再生中の映像」で確認できます。",
+      fullhdWaiting: "作品を再生すると、1920×1080（フルHD）の映像を要求します。",
+      originalStatus: "Disney+の標準設定のまま再生します（Edgeでは通常720pまで）。",
+      diagnosticStatus: "普段はフルHDかOFFを選んでください。",
+      switchFailed: "設定を保存できなかったため、切り替えていません。",
+      reloadFailed: "ページを再読み込みできませんでした。実験を終了するにはタブを閉じてください。",
+      intelRequired: "Intel GPUを確認できなかったため、4Kは開始していません。",
+      waiting: "再生開始待ち", paused: "（一時停止中）", drops: "フレーム落ち",
+    }),
+    en: Object.freeze({
+      close: "Close", closeTitle: "Alt+Shift+4 also opens and closes this panel",
+      label: "Quality request (switching reloads the page)", group: "Quality request",
+      fullhd: "Full HD (recommended)", original: "OFF (Disney+ default)", video: "Video playing",
+      copy: "Copy diagnostics", copyTitle: "Copy diagnostic information to the clipboard for a bug report", copied: "Copied", copyFailed: "Copy failed",
+      dev: "Developer diagnostics (not needed for normal use, Japanese only)",
+      switching: "Switching…", fullhdOn: "Full HD request ON", off: "OFF (Disney+ default)", intel4k: "Intel 4K request (this page only)",
+      diagnosticOnce: "Diagnostic mode (this page only)", diagnostic: "Diagnostic mode",
+      reloading: "Setting saved. Reloading the page.",
+      fullhdFailed: "Full HD could not be prepared, so playback was stopped. The next page load starts with OFF. To try again, choose Full HD.",
+      stopped: "Playback was stopped. See Developer diagnostics for details.",
+      fullhdSelected: "The 1920×1080 video was selected. Check the actual resolution under Video playing.",
+      fullhdWaiting: "When you play a title, the 1920×1080 (Full HD) video is requested.",
+      originalStatus: "Plays with the Disney+ default settings (usually up to 720p in Edge).",
+      diagnosticStatus: "A diagnostic mode is active. For normal viewing, choose Full HD or OFF.",
+      switchFailed: "The setting could not be saved, so nothing was changed.",
+      reloadFailed: "The page could not be reloaded. Close the tab to end the test.",
+      intelRequired: "4K was not started because an Intel GPU could not be confirmed.",
+      waiting: "Waiting for playback", paused: " (paused)", drops: "dropped frames",
+    }),
+  });
+  const UI_TEXT = PANEL_TEXT[UI_LANGUAGE];
+  // Japanese keeps the detailed notice; English shows the fixed summary.
+  const localNotice = (japanese, key) => (UI_LANGUAGE === "ja" ? japanese : UI_TEXT[key]);
+
+  function describeUserMode() {
+    if (state.modeReloadPending) return UI_TEXT.switching;
+    if (state.mode === "fullhd") return UI_TEXT.fullhdOn;
+    if (state.mode === DEFAULT_MODE) return UI_TEXT.off;
+    if (state.mode === INTEL_4K_MODE) return UI_TEXT.intel4k;
+    return isExperimentalMode(state.mode) ? UI_TEXT.diagnosticOnce : UI_TEXT.diagnostic;
+  }
+
+  function describeUserStatus() {
+    const plan = getModePlan(state.mode);
+    if (state.modeReloadPending) return UI_TEXT.reloading;
+    if (state.switchNotice) return state.switchNotice;
+    if (plan.continuousFhd && (state.singleVariantFailed || state.playbackBlocked)) return UI_TEXT.fullhdFailed;
+    if (state.playbackBlocked || state.singleVariantFailed) return UI_TEXT.stopped;
+    if (plan.continuousFhd) return state.singleVariantAccepted ? UI_TEXT.fullhdSelected : UI_TEXT.fullhdWaiting;
+    if (state.mode === DEFAULT_MODE) return UI_TEXT.originalStatus;
+    return UI_LANGUAGE === "ja" ? `${plan.label}。${UI_TEXT.diagnosticStatus}` : UI_TEXT.diagnosticStatus;
+  }
+
+  function describeUserVideo() {
+    if (!state.video?.width || !state.video?.height) return UI_TEXT.waiting;
+    const drops = state.video.total ? ` · ${UI_TEXT.drops} ${state.video.dropped}/${state.video.total}` : "";
+    return `${state.video.width} × ${state.video.height}${state.video.paused ? UI_TEXT.paused : ""}${drops}`;
+  }
+
+  function userBadge(actual4k) {
+    if (state.playbackBlocked || state.singleVariantFailed) return { text: "!", tone: "error" };
+    if (actual4k) return { text: "4K", tone: "ok" };
+    if (state.mode === "fullhd") return { text: "HD", tone: "on" };
+    if (state.mode === DEFAULT_MODE) return { text: "OFF", tone: "off" };
+    if (state.mode === INTEL_4K_MODE) return { text: "4K", tone: "on" };
+    return { text: "DBG", tone: "debug" };
+  }
+
   function renderOverlayContents() {
     if (!state.overlay) return;
     const { elements } = state.overlay;
@@ -3834,8 +3933,16 @@ function createSingleVariantNetworkAdapter({
       ? ` / drop ${state.video.dropped}/${state.video.total}`
       : "";
 
-    elements.badge.textContent = actual4k ? "4K" : "?";
-    elements.badge.dataset.ok = actual4k ? "true" : "false";
+    const badge = userBadge(actual4k);
+    elements.badge.textContent = badge.text;
+    elements.badge.dataset.tone = badge.tone;
+    elements.summary.textContent = describeUserMode();
+    for (const choice of elements.choices) {
+      choice.setAttribute("aria-checked", String(choice.dataset.mode === state.mode));
+      choice.disabled = state.modeReloadPending;
+    }
+    elements.status.textContent = describeUserStatus();
+    elements.video.textContent = describeUserVideo();
     if (!state.modeReloadPending) elements.mode.value = state.mode;
     elements.mode.disabled = state.modeReloadPending;
     elements.guard.textContent = state.guardNotice;
@@ -3913,8 +4020,11 @@ function createSingleVariantNetworkAdapter({
         :host { all: initial; }
         .panel { width: min(430px, calc(100vw - 28px)); box-sizing: border-box; color: #f7f7fa; background: rgba(12,14,22,.94); border: 1px solid rgba(255,255,255,.16); border-radius: 14px; box-shadow: 0 14px 42px rgba(0,0,0,.48); overflow: hidden; backdrop-filter: blur(14px); font: 12px/1.45 "Segoe UI", system-ui, sans-serif; }
         .head { display:flex; align-items:center; gap:9px; padding:10px 11px; background:rgba(255,255,255,.055); }
-        .badge { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; font-weight:800; background:#5c6274; color:white; }
-        .badge[data-ok="true"] { background:#00a86b; }
+        .badge { width:34px; height:30px; border-radius:9px; display:grid; place-items:center; font-size:11px; font-weight:800; background:#5c6274; color:white; }
+        .badge[data-tone="on"] { background:#1769e0; }
+        .badge[data-tone="ok"] { background:#00a86b; }
+        .badge[data-tone="error"] { background:#b42318; }
+        .badge[data-tone="debug"] { background:#946200; }
         .title { min-width:0; flex:1; }
         .title strong { display:block; font-size:13px; letter-spacing:.01em; }
         .title span { color:#aeb5c8; }
@@ -3931,19 +4041,41 @@ function createSingleVariantNetworkAdapter({
         .error { margin:8px 0 0; padding:7px 8px; border-radius:8px; color:#ffd5d5; background:rgba(210,55,55,.18); }
         .actions { display:flex; justify-content:flex-end; gap:7px; margin-top:9px; }
         details { margin-top:9px; } summary { cursor:pointer; } pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+        .label { margin:0 0 6px; color:#9ea6ba; }
+        .choices { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:9px; }
+        .choice { padding:8px 6px; text-align:center; }
+        .choice[aria-checked="true"] { background:#1769e0; border-color:#1769e0; font-weight:700; }
+        .choice:disabled { cursor:default; opacity:.7; }
+        .status { margin:0 0 9px; color:#e3e8f4; }
+        .dev { border-top:1px solid rgba(255,255,255,.12); padding-top:8px; }
+        .dev > summary { color:#9ea6ba; }
+        .dev-body { margin-top:9px; }
         .collapsed .body, .collapsed .title span, .collapsed .title strong { display:none; }
         .collapsed { width:auto; }
         .collapsed .head { padding:7px; }
         .collapsed .title { display:none; }
       </style>
-      <section class="panel" aria-label="Disney+ 4KHDR Enhanced diagnostics">
+      <section class="panel" aria-label="Disney+ 4KHDR Enhanced">
         <div class="head">
           <span class="badge">?</span>
-          <span class="title"><strong>Disney+ 4KHDR Enhanced v${VERSION}</strong><span>寸法とフレーム進行を別表示</span></span>
-          <button class="collapse" type="button" title="Alt+Shift+4でも開閉">閉じる</button>
+          <span class="title"><strong>Disney+ 4KHDR Enhanced v${VERSION}</strong><span class="summary"></span></span>
+          <button class="collapse" type="button" title="${UI_TEXT.closeTitle}">${UI_TEXT.close}</button>
         </div>
         <div class="body">
-          <select class="mode" aria-label="再生要求モード">
+          <p class="label">${UI_TEXT.label}</p>
+          <div class="choices" role="radiogroup" aria-label="${UI_TEXT.group}">
+            <button class="choice" type="button" role="radio" data-mode="fullhd">${UI_TEXT.fullhd}</button>
+            <button class="choice" type="button" role="radio" data-mode="original">${UI_TEXT.original}</button>
+          </div>
+          <p class="status" role="status"></p>
+          <dl>
+            <dt>${UI_TEXT.video}</dt><dd class="video">${UI_TEXT.waiting}</dd>
+          </dl>
+          <div class="actions"><button class="copy" type="button" title="${UI_TEXT.copyTitle}">${UI_TEXT.copy}</button></div>
+          <details class="dev">
+          <summary>${UI_TEXT.dev}</summary>
+          <div class="dev-body">
+          <select class="mode" aria-label="診断用の再生要求モード">
             <option value="fullhd">フルHD（1080p SDR・時間制限なし）</option>
             <option value="4k-hdr10-single-pq">4K HDR10・HEVC/AACを1候補に固定（30秒限定）</option>
             <option value="1080p-hevc-single-sdr">1080p SDR・HEVC/AACを1候補に固定（75秒比較）</option>
@@ -3977,8 +4109,10 @@ function createSingleVariantNetworkAdapter({
           <p class="note"></p>
           <p class="error" hidden></p>
           <p class="environment">未チェック</p>
-          <div class="actions"><button class="check" type="button">環境チェック</button><button class="copy" type="button">診断をコピー</button></div>
+          <div class="actions"><button class="check" type="button">環境チェック</button></div>
           <details><summary>処理経過・エラー詳細</summary><pre class="trace"></pre></details>
+          </div>
+          </details>
         </div>
       </section>`;
 
@@ -3986,6 +4120,10 @@ function createSingleVariantNetworkAdapter({
     const panel = shadow.querySelector(".panel");
     const elements = {
       badge: shadow.querySelector(".badge"),
+      summary: shadow.querySelector(".summary"),
+      choices: [...shadow.querySelectorAll(".choice")],
+      status: shadow.querySelector(".status"),
+      video: shadow.querySelector(".video"),
       mode: shadow.querySelector(".mode"),
       guard: shadow.querySelector(".guard"),
       request: shadow.querySelector(".request"),
@@ -4014,13 +4152,13 @@ function createSingleVariantNetworkAdapter({
       setDebugVisibility(false);
     });
 
-    elements.mode.addEventListener("change", () => {
-      const selected = elements.mode.value;
+    const switchMode = (selected) => {
       if (state.modeReloadPending) return;
       let outcome;
       try { outcome = prepareModeReload(selected, localStorage, sessionStorage, location.href, Date.now()); }
       catch (_) { outcome = { reload: false, notice: "設定領域を利用できないため切替を中止しました。" }; }
       state.guardNotice = outcome.notice;
+      state.switchNotice = outcome.reload ? "" : localNotice(outcome.notice, "switchFailed");
       state.modeReloadPending = outcome.reload;
       renderOverlay();
       // Never switch the live EME/request policy midway through an old session.
@@ -4030,20 +4168,31 @@ function createSingleVariantNetworkAdapter({
           safelyObserve(() => clearTestTicket(sessionStorage));
           state.modeReloadPending = false;
           state.guardNotice = "再読込を開始できませんでした。実験を終了するにはタブを閉じてください。";
+          state.switchNotice = localNotice(state.guardNotice, "reloadFailed");
           renderOverlay();
         }
       }
-    });
+    };
+    elements.mode.addEventListener("change", () => switchMode(elements.mode.value));
+    for (const choice of elements.choices) {
+      choice.addEventListener("click", () => {
+        // Re-selecting a working mode does nothing; after a failure it re-arms full-HD.
+        if (choice.dataset.mode === state.mode && !state.playbackBlocked && !state.singleVariantFailed) return;
+        switchMode(choice.dataset.mode);
+      });
+    }
+    // A diagnostic mode is only reachable from the developer section; keep it open.
+    if (!USER_MODES.includes(state.mode)) shadow.querySelector(".dev").open = true;
 
     const copyButton = shadow.querySelector(".copy");
     copyButton.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(diagnosticReport());
-        copyButton.textContent = "コピー済み";
+        copyButton.textContent = UI_TEXT.copied;
       } catch (_error) {
-        copyButton.textContent = "コピー失敗";
+        copyButton.textContent = UI_TEXT.copyFailed;
       }
-      setTimeout(() => { copyButton.textContent = "診断をコピー"; }, 1400);
+      setTimeout(() => { copyButton.textContent = UI_TEXT.copy; }, 1400);
     });
 
     renderOverlay();
@@ -4080,6 +4229,7 @@ function createSingleVariantNetworkAdapter({
         if (state.modeReloadPending) return { ok: false, reason: "reload-pending" };
         if (probeGpuVendor() !== "intel") {
           state.guardNotice = `4Kは開始していません。WebGLのGPU分類: ${gpuVendorHint}。Intelを確認できる場合だけ通常メニューから4Kを開始できます。描画GPUと保護映像のデコード・表示経路は一致するとは限りません。`;
+          state.switchNotice = localNotice(state.guardNotice, "intelRequired");
           setDebugVisibility(true);
           renderOverlay();
           return { ok: false, reason: "intel-gpu-required" };
@@ -4087,6 +4237,7 @@ function createSingleVariantNetworkAdapter({
         const outcome = prepareModeReload(INTEL_4K_MODE, localStorage, sessionStorage, location.href, Date.now(), true);
         state.modeReloadPending = outcome.reload;
         state.guardNotice = outcome.notice;
+        state.switchNotice = outcome.reload ? "" : localNotice(outcome.notice, "switchFailed");
         renderOverlay();
         return { ok: outcome.reload, reload: outcome.reload, mode: INTEL_4K_MODE };
       },
@@ -4097,6 +4248,7 @@ function createSingleVariantNetworkAdapter({
         const outcome = prepareModeReload(mode, localStorage, sessionStorage, location.href, Date.now());
         state.modeReloadPending = outcome.reload;
         state.guardNotice = outcome.notice;
+        state.switchNotice = outcome.reload ? "" : localNotice(outcome.notice, "switchFailed");
         renderOverlay();
         return { ok: outcome.reload, reload: outcome.reload, mode };
       },

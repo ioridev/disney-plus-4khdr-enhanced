@@ -39,6 +39,9 @@ assert.ok(api, "test API should be exported");
   ];
   assert.equal(Object.keys(api.MODE_PLANS).length, 19);
   assert.deepEqual([...source.matchAll(/<option value="([^"]+)">/g)].map(match => match[1]).sort(), expectedModes.slice().sort(), 'every mode is actually selectable in the UI');
+  const devSection = source.indexOf('<details class="dev">');
+  assert.ok(devSection > 0 && source.indexOf('<option value=') > devSection, 'diagnostic modes are only in the developer section');
+  assert.deepEqual([...source.matchAll(/class="choice"[^>]*data-mode="([^"]+)"/g)].map(match => match[1]), ['fullhd', 'original'], 'the everyday panel offers Full HD and OFF only');
   assert.deepEqual(Object.keys(api.MODE_PLANS).sort(), expectedModes.sort(), "retain all modes plus the bounded HDR comparison");
   assert.deepEqual(JSON.parse(JSON.stringify(api.MODE_PLANS["4k-hdr10-single-pq"])), {
     label:"4K HDR10・HEVC/AACを1候補に固定（30秒限定）", scenario:"tv-drm-ctr-h265-hdr10-atmos",

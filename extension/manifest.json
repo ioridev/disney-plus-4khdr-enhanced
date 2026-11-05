@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Disney+ 4KHDR Enhanced",
-  "version": "0.5.3",
-  "description": "Disney+のフルHD要求をON/OFF。右クリックからIntel向け4Kと診断を選択。Intel内蔵GPUで約5分の4K再生を確認。環境依存。",
+  "version": "0.5.4",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "scripting", "contextMenus"],
   "action": {
-    "default_title": "Disney+ 4KHDR Enhanced — クリックでフルHD ON/OFF"
+    "default_title": "__MSG_actionTitle__"
   },
   "background": {
     "service_worker": "background.mjs",

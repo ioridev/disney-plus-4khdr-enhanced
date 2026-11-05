@@ -1,0 +1,8 @@
+{
+  "extDescription": {
+    "message": "Turn the Disney+ Full HD request ON/OFF. Right-click for Intel 4K and diagnostics. 4K was tested on an Intel iGPU; results vary."
+  },
+  "actionTitle": {
+    "message": "Disney+ 4KHDR Enhanced — click to turn Full HD ON/OFF"
+  }
+}

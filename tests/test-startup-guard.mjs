@@ -48,7 +48,15 @@ assert.deepEqual({
 });
 assert.equal(api.MODE_PLANS['1080p-hevc-hw-persistent'].scenario.includes('hdr10'), false, 'the comparison mode is not an HDR/4K mode');
 assert.equal(api.MODE_PLANS['4k-hdr10-hw-persistent'].scenario, 'tv-drm-ctr-h265-hdr10-atmos', 'existing HDR persistent mode remains available');
-assert.equal(boot(makeStorage(), makeStorage()).mode, 'original');
+assert.equal(boot(makeStorage(), makeStorage()).mode, 'fullhd', 'no saved preference starts full-HD');
+for (const stored of ['original', 'unknown', 'constructor']) {
+  assert.equal(boot(makeStorage([[api.STORAGE_KEY, stored]]), makeStorage()).mode, 'original', `saved ${stored} stays OFF`);
+}
+{
+  const local = makeStorage();
+  local.getItem = () => { throw new Error('storage unavailable'); };
+  assert.equal(boot(local, makeStorage()).mode, 'original', 'unreadable storage stays OFF');
+}
 assert.equal(api.getModePlan('constructor').label, api.MODE_PLANS.original.label);
 
 for (const mode of risky) {
@@ -71,6 +79,7 @@ for (const mode of ['fullhd', '4k-sdr', '1080p', 'original']) {
   assert.equal(boot(local, session).mode, mode);
 }
 for (const patch of [
+  {version:'0.5.3'},
   {version:'0.5.0'},
   {version:'0.4.0'},
   {version:'0.3.16'},
@@ -81,7 +90,7 @@ for (const patch of [
   {documentUrl:`${path}?other=1`}, {documentUrl:`${path}#other`},
 ]) {
   const local = makeStorage([[api.STORAGE_KEY, 'original']]);
-  const session = makeStorage([[api.TEST_TICKET_KEY, JSON.stringify({version:'0.5.3', mode:risky[0], documentUrl:path, createdAt:now, ...patch})]]);
+  const session = makeStorage([[api.TEST_TICKET_KEY, JSON.stringify({version:'0.5.4', mode:risky[0], documentUrl:path, createdAt:now, ...patch})]]);
   assert.equal(boot(local, session).mode, 'original', JSON.stringify(patch));
   assert.equal(session.getItem(api.TEST_TICKET_KEY), null);
 }
@@ -138,7 +147,7 @@ assert.equal(api.checkpointPhase('鍵状態 #1', '{"status-pending":1}'), 'keys-
 assert.equal(api.checkpointPhase('鍵状態 #1', '{"usable":1}'), 'keys-usable');
 assert.equal(api.checkpointPhase('unknown https://example.test?token=secret', 'secret'), null);
 const filtered = api.readCheckpoint(JSON.stringify({
-  version:'0.5.3', mode:risky[0], url:'secret', license:'secret',
+  version:'0.5.4', mode:risky[0], url:'secret', license:'secret',
   steps:[{time:now, phase:'update-start', secret:'secret'}, {time:1e100, phase:'update-ok'}, {time:now, phase:'secret'}],
 }));
 assert.equal(filtered.steps.length, 1);

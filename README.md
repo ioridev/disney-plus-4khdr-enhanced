@@ -19,7 +19,7 @@ An unofficial extension for Microsoft Edge on Windows that toggles Disney+ strea
 Approximately 5 minutes of continuous 4K HDR playback was verified on a test machine with Intel Iris Xe, but operation is not guaranteed across all Intel products or all dGPUs. The limit for dGPUs reflects this extension's supported scope, not the hardware's inherent capability. For specific test measurements and validation history, see [docs/intel-4k.md](docs/intel-4k.md) (Japanese), [docs/diagnostics.md](docs/diagnostics.md) (Japanese), and [docs/related-issues.md](docs/related-issues.md) (Japanese).
 
 > [!NOTE]
-> **Disney+ player update (October 2026):** v0.5.2 restored the Full HD mode on Disney+ player SDK 26.13, and v0.5.3 fixes a startup guard that could still stop it with error code 83. The Intel 4K mode has not been re-verified on the new SDK yet and stops before playback.
+> **Disney+ player updates (October–November 2026):** v0.5.2 restored the Full HD mode on Disney+ player SDK 26.13, v0.5.3 fixed a startup guard that could still stop it with error code 83, and v0.5.4 supports SDK 26.14.2. The Intel 4K mode has not been re-verified on the new SDK yet and stops before playback.
 
 ## Prerequisites (Edge Settings)
 
@@ -44,7 +44,10 @@ These settings align the environment with the extension's operating requirements
 ## Usage
 
 - **Left-click icon**: Toggles the Full HD request ON/OFF and reloads the active tab.
-- **Right-click icon**: Select "Start 4K (for Intel GPUs, this page only)" or "Toggle Debug UI" (menu labels are currently in Japanese; `Alt+Shift+4` can also toggle the debug UI).
+- **Initial state**: Until you toggle it for the first time, the extension starts with the Full HD request ON. Once you turn it OFF, it stays OFF. If Full HD playback fails, the next page load starts OFF.
+- **Right-click icon**: Select "Start 4K (for Intel GPUs, this page only)" or "Show/Hide Settings Panel" (`Alt+Shift+4` can also toggle the panel).
+- **Language**: The settings panel, toolbar tooltips and menu follow the browser language: Japanese for Japanese, English otherwise. The collapsed 開発者向け診断 (developer diagnostics) section stays in Japanese.
+- **Settings panel**: Switch between "Full HD (recommended)" and "OFF (Disney+ default)", see the resolution of the video that is playing, and use "Copy diagnostics" for bug reports. Diagnostic modes and detailed logs are in the collapsed 開発者向け診断 (developer diagnostics) section.
 - **4K mode behavior**: The 4K request is active for the current page only and reverts to OFF upon reload. The extension uses WebGL to detect the GPU, but this does not guarantee physical video output routing.
 
 | Badge | State |
@@ -52,10 +55,10 @@ These settings align the environment with the extension's operating requirements
 | OFF | Normal playback (unmodified) |
 | HD | Requesting Full HD (does not guarantee actual playback resolution) |
 | 4K | Requesting Intel 4K (active for this page only) |
-| DBG | Diagnostic mode set via the debug UI |
-| ! | Error occurred (check the debug UI) |
+| DBG | Diagnostic mode chosen under 開発者向け診断 (developer diagnostics) in the settings panel |
+| ! | Error occurred (check the settings panel) |
 
-The toolbar badge indicates the requested mode, not the actual playback quality. Check actual video dimensions, playback duration, and frame progress in the debug UI.
+The toolbar badge indicates the requested mode, not the actual playback quality. Check the actual resolution under 再生中の映像 (video playing) in the settings panel, and playback duration and frame progress under 開発者向け診断 (developer diagnostics).
 
 Standard Full HD and Intel 4K modes do not have short timeout shutdown timers, nor do they perform automatic playback or automatic retry on errors. For details on diagnostic time-limited modes, see [docs/diagnostics.md](docs/diagnostics.md) (Japanese).
 

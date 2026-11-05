@@ -10,21 +10,33 @@ const source = read('extension/DisneyPlus-Edge-Enhanced.user.js');
 
 assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.name, 'Disney+ 4KHDR Enhanced');
-assert.equal(manifest.action.default_title, 'Disney+ 4KHDR Enhanced — クリックでフルHD ON/OFF');
+assert.equal(manifest.default_locale, 'en');
+assert.equal(manifest.description, '__MSG_extDescription__');
+assert.equal(manifest.action.default_title, '__MSG_actionTitle__');
+const locales = Object.fromEntries(['en', 'ja'].map((language) => [language, JSON.parse(read(`extension/_locales/${language}/messages.json`))]));
+assert.deepEqual(Object.keys(locales.en).sort(), Object.keys(locales.ja).sort(), 'every message exists in both languages');
+assert.deepEqual(Object.keys(locales.en).sort(), ['actionTitle', 'extDescription']);
+assert.equal(locales.ja.actionTitle.message, 'Disney+ 4KHDR Enhanced — クリックでフルHD ON/OFF');
+assert.equal(locales.en.actionTitle.message, 'Disney+ 4KHDR Enhanced — click to turn Full HD ON/OFF');
+for (const language of ['en', 'ja']) {
+  assert.ok(locales[language].extDescription.message.length <= 132, `${language} description fits the store limit`);
+}
 assert.equal(pkg.name, 'disney-plus-4khdr-enhanced');
 assert.equal(pkg.repository.url, 'https://github.com/ioridev/disney-plus-4khdr-enhanced.git');
 assert.equal(manifest.version, pkg.version);
 assert.equal(pkg.license, 'MIT');
-assert.deepEqual(fs.readdirSync(new URL('extension/', root)).sort(), ['DisneyPlus-Edge-Enhanced.user.js', 'background.mjs', 'bridge.js', 'manifest.json', 'toolbar.mjs']);
+assert.deepEqual(fs.readdirSync(new URL('extension/', root)).sort(), ['DisneyPlus-Edge-Enhanced.user.js', '_locales', 'background.mjs', 'bridge.js', 'manifest.json', 'toolbar.mjs']);
+assert.deepEqual(fs.readdirSync(new URL('extension/_locales/', root)).sort(), ['en', 'ja']);
 assert.deepEqual(manifest.background, {service_worker: 'background.mjs', type: 'module'});
 assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'contextMenus']);
 assert.equal(manifest.action.default_popup, undefined, 'click toggles directly without a popup');
 assert.equal(manifest.host_permissions, undefined);
 assert.equal(manifest.externally_connectable, undefined);
 const packageScript = read('scripts/package.ps1');
+for (const language of ['en', 'ja']) assert.ok(packageScript.includes(`'extension/_locales/${language}/messages.json'`), `${language} messages are packaged`);
 assert.ok(packageScript.includes('disney-plus-4khdr-enhanced-v$packageVersion.zip'), 'release ZIP uses the new name');
 assert.ok(packageScript.includes("'DisneyPlus-4KHDR-Enhanced.user.js'"), 'standalone release asset uses the new name');
-for (const name of fs.readdirSync(new URL('extension/', root))) {
+for (const name of fs.readdirSync(new URL('extension/', root)).filter((entry) => entry !== '_locales')) {
   assert.ok(packageScript.includes(`'extension/${name}'`), `${name} must be included in the release archive`);
 }
 assert.equal(manifest.content_scripts.length, 2);

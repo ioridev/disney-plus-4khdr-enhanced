@@ -26,8 +26,8 @@ export function applyPageCommand(command) {
       // next reload. Do not inject another copy into an old playback session.
       const key = 'ioridev.disneyplus4k.mode.v1';
       const mode = localStorage.getItem(key) === 'fullhd' ? 'original' : 'fullhd';
-      sessionStorage.removeItem('ioridev.disneyplus4k.once.v0.5.3');
-      if (sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.3') !== null) return { ok: false };
+      sessionStorage.removeItem('ioridev.disneyplus4k.once.v0.5.4');
+      if (sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.4') !== null) return { ok: false };
       localStorage.setItem(key, mode);
       return { ok: localStorage.getItem(key) === mode, reload: true, mode };
     }
@@ -44,22 +44,56 @@ export function applyPageCommand(command) {
   return { ok: false };
 }
 
-export function badgeState(report) {
-  if (report?.reason === 'intel-gpu-required') return { text: '!', color: '#946200', title: 'Intel GPUを確認できず4Kは開始していません。デバッグUIを確認してください。' };
-  if (report?.reason === 'reload-required') return { text: '!', color: '#946200', title: '4Kの開始には拡張とDisney+ページを再読み込みしてください。' };
-  if (report?.failed === true) return { text: '!', color: '#b42318', title: '再生を中止しました。右クリックからデバッグUIを確認してください。' };
-  if (report?.mode === '4k-hdr10-sdk-playready') return { text: '4K', color: '#1769e0', title: '4K HDR10要求 ON — クリックでOFF（このページのみ・実際の画質やHDR表示とは別）' };
-  if (report?.mode === 'fullhd') return { text: 'HD', color: '#1769e0', title: 'フルHD要求 ON — クリックでOFF（実際の再生画質とは別）' };
-  if (report?.mode && report.mode !== 'original') return { text: 'DBG', color: '#946200', title: 'デバッグモード — クリックで通常のフルHD要求に切り替え' };
-  return { text: 'OFF', color: '#64748b', title: 'フルHD要求 OFF — クリックでON' };
+// Toolbar text follows the browser UI language: Japanese for ja, English otherwise.
+const TOOLBAR_TEXT = Object.freeze({
+  ja: Object.freeze({
+    intelRequired: 'Intel GPUを確認できず4Kは開始していません。設定パネルを確認してください。',
+    reloadRequired: '4Kの開始には拡張とDisney+ページを再読み込みしてください。',
+    failed: '再生を中止しました。右クリックから設定パネルを確認してください。',
+    intel4k: '4K HDR10要求 ON — クリックでOFF（このページのみ・実際の画質やHDR表示とは別）',
+    fullhd: 'フルHD要求 ON — クリックでOFF（実際の再生画質とは別）',
+    diagnostic: '診断モード — クリックでフルHD要求に切り替え',
+    off: 'フルHD要求 OFF — クリックでON',
+    panelMenu: '設定パネルを表示／非表示',
+    intel4kMenu: '4Kを開始（Intel GPU向け・このページのみ）',
+  }),
+  en: Object.freeze({
+    intelRequired: '4K was not started because an Intel GPU could not be confirmed. Check the settings panel.',
+    reloadRequired: 'To start 4K, reload the extension and the Disney+ page.',
+    failed: 'Playback was stopped. Right-click to open the settings panel.',
+    intel4k: '4K HDR10 request ON — click to turn OFF (this page only; not the actual quality or HDR output)',
+    fullhd: 'Full HD request ON — click to turn OFF (not the actual playback quality)',
+    diagnostic: 'Diagnostic mode — click to switch to the Full HD request',
+    off: 'Full HD request OFF — click to turn ON',
+    panelMenu: 'Show/hide the settings panel',
+    intel4kMenu: 'Start 4K (for Intel GPUs, this page only)',
+  }),
+});
+
+export function toolbarLanguage(api) {
+  let language = '';
+  try { language = String(api?.i18n?.getUILanguage?.() || ''); } catch { /* Fall back below. */ }
+  return !language || /^ja(?:-|$)/i.test(language) ? 'ja' : 'en';
+}
+
+export function badgeState(report, language = 'ja') {
+  const text = TOOLBAR_TEXT[language] ?? TOOLBAR_TEXT.ja;
+  if (report?.reason === 'intel-gpu-required') return { text: '!', color: '#946200', title: text.intelRequired };
+  if (report?.reason === 'reload-required') return { text: '!', color: '#946200', title: text.reloadRequired };
+  if (report?.failed === true) return { text: '!', color: '#b42318', title: text.failed };
+  if (report?.mode === '4k-hdr10-sdk-playready') return { text: '4K', color: '#1769e0', title: text.intel4k };
+  if (report?.mode === 'fullhd') return { text: 'HD', color: '#1769e0', title: text.fullhd };
+  if (report?.mode && report.mode !== 'original') return { text: 'DBG', color: '#946200', title: text.diagnostic };
+  return { text: 'OFF', color: '#64748b', title: text.off };
 }
 
 export function installToolbar(api) {
   const busy = new Set();
   const menuId = 'disney-plus-enhanced-debug';
   const intel4kMenuId = 'disney-plus-enhanced-intel-4k';
+  const language = toolbarLanguage(api);
   async function paint(tabId, report) {
-    const view = badgeState(report);
+    const view = badgeState(report, language);
     await Promise.all([
       api.action.setBadgeText({ tabId, text: view.text }),
       api.action.setBadgeBackgroundColor({ tabId, color: view.color }),
@@ -99,11 +133,11 @@ export function installToolbar(api) {
   api.runtime.onInstalled.addListener(() => {
     void api.contextMenus.removeAll().then(() => {
       api.contextMenus.create({
-        id: menuId, title: 'デバッグUIを表示／非表示', contexts: ['action'],
+        id: menuId, title: TOOLBAR_TEXT[language].panelMenu, contexts: ['action'],
         documentUrlPatterns: ['https://www.disneyplus.com/*'],
       });
       api.contextMenus.create({
-        id: intel4kMenuId, title: '4Kを開始（Intel GPU向け・このページのみ）', contexts: ['action'],
+        id: intel4kMenuId, title: TOOLBAR_TEXT[language].intel4kMenu, contexts: ['action'],
         documentUrlPatterns: ['https://www.disneyplus.com/*'],
       });
     }).catch(() => {});

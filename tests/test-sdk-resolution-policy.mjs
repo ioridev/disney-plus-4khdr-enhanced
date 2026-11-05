@@ -9,7 +9,7 @@ const SDK_MODE = process.argv[2] ?? MODE_HDR10;
 assert.ok([MODE_HDR10, MODE_SDR].includes(SDK_MODE),
   `usage: node tests/test-sdk-resolution-policy.mjs <${MODE_HDR10}|${MODE_SDR}>`);
 const SDK_VERSION = '26.10.0-jasmine';
-const SCRIPT_VERSION = '0.5.3';
+const SCRIPT_VERSION = '0.5.4';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const DOCUMENT_URL = 'https://www.disneyplus.com/ja-jp/play/sdk-resolution-policy-test';
 const PLAYBACK_SCENARIO = SDK_MODE === MODE_HDR10 ? 'tv-drm-ctr-h265-hdr10-atmos' : 'tv-drm-ctr-h265-atmos';
@@ -249,6 +249,7 @@ const makeOverlayDocument = () => {
         contains: () => false,
         toggle: () => {},
       },
+      setAttribute: () => {},
       addEventListener: (event, callback) => events.set(`${name}:${event}`, callback),
     };
     nodes.set(name, value);
@@ -259,6 +260,9 @@ const makeOverlayDocument = () => {
   const shadow = {
     set innerHTML(_value) {},
     querySelector: (selector) => nodes.get(selector) || node(selector),
+    querySelectorAll: (selector) => selector === '.choice'
+      ? ['fullhd', 'original'].map((mode) => Object.assign(nodes.get(`.choice:${mode}`) || node(`.choice:${mode}`), {dataset: {mode}}))
+      : [],
   };
   for (const selector of selectors) node(selector);
   const host = {
@@ -274,6 +278,7 @@ const makeOverlayDocument = () => {
       querySelectorAll: () => [],
     },
     events,
+    nodes,
   };
 };
 
@@ -283,6 +288,7 @@ const createRuntime = ({
   sessionKind = 'accessor',
   documentElement = false,
   eme = 'valid',
+  language = null,
 } = {}) => {
   const callbacks = new Map();
   const localStorage = makeStorage([['ioridev.disneyplus4k.mode.v1', SDK_MODE]]);
@@ -329,6 +335,7 @@ const createRuntime = ({
       }
     }
     ${eme === 'valid' ? `globalThis.navigator = new TestNavigator();` : ''}
+    ${language ? `Object.defineProperty(globalThis.navigator, 'language', {value: ${JSON.stringify(language)}, configurable: true});` : ''}
 
     globalThis.nativeConstructorCalls = [];
     globalThis.nativeConstructorError = new Error('native PlaybackSession failure');
@@ -392,7 +399,8 @@ const createRuntime = ({
   `, context);
   vm.runInContext(source, context);
   const overlayEvents = overlayDocument ? overlayDocument.events : null;
-  return {context, callbacks, localStorage, sessionStorage, overlayEvents};
+  const overlayNodes = overlayDocument ? overlayDocument.nodes : null;
+  return {context, callbacks, localStorage, sessionStorage, overlayEvents, overlayNodes};
 };
 
 const installService = (runtime) => vm.runInContext(`globalThis['playback-service'] = sdkExport;`, runtime.context);
@@ -714,6 +722,40 @@ for (const sessionKind of ['accessor', 'data']) {
   await Promise.resolve();
   assert.equal(runtimeJson(runtime, 'nativeEmeCalls.length'), 0,
     'UHD environment check does not issue a second native EME capability query');
+}
+
+// The everyday panel offers only Full HD / OFF; any other mode (the Intel 4K
+// mode or a diagnostic one) opens the developer section. Switching saves the choice and reloads once.
+{
+  const runtime = createRuntime({sessionKind: 'accessor', documentElement: true});
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  assert.equal(control.getState().mode, SDK_MODE);
+  control.toggleDebug();
+  assert.equal(runtime.overlayNodes.get('.dev').open, true, 'a mode outside Full HD / OFF opens the developer section');
+  const intel = SDK_MODE === MODE_HDR10;
+  assert.equal(runtime.overlayNodes.get('.badge').textContent, intel ? '4K' : 'DBG');
+  assert.match(runtime.overlayNodes.get('.summary').textContent, intel ? /Intel向け4K/ : /診断モード/);
+  let reloads = 0;
+  runtime.context.location.reload = () => { reloads++; };
+  runtime.overlayEvents.get('.choice:fullhd:click')();
+  assert.equal(runtime.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'fullhd', 'the Full HD choice is saved');
+  assert.equal(runtime.sessionStorage.getItem(TICKET_KEY), null, 'no experiment ticket is left behind');
+  assert.equal(reloads, 1);
+  assert.match(runtime.overlayNodes.get('.status').textContent, /再読み込み/);
+  runtime.overlayEvents.get('.choice:original:click')();
+  assert.equal(reloads, 1, 'no second switch while a reload is pending');
+  assert.equal(runtime.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'fullhd');
+}
+
+// An English browser gets the English everyday panel; the default stays Japanese.
+{
+  const runtime = createRuntime({sessionKind: 'accessor', documentElement: true, language: 'en-US'});
+  runtime.context.__DisneyPlusEdgeEnhancedToolbar.toggleDebug();
+  const summary = runtime.overlayNodes.get('.summary').textContent;
+  const status = runtime.overlayNodes.get('.status').textContent;
+  assert.match(summary, SDK_MODE === MODE_HDR10 ? /^Intel 4K request/ : /^Diagnostic mode/);
+  assert.match(status, /choose Full HD or OFF/);
+  assert.doesNotMatch(summary + status, /[\u3040-\u30ff\u4e00-\u9fff]/, 'no Japanese in the English everyday panel');
 }
 
 for (const vendor of ['Intel', 'NVIDIA', 'AMD', 'unknown']) {

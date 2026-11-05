@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { applyPageCommand, badgeState, installToolbar, isDisneyPage } from '../extension/toolbar.mjs';
+import { applyPageCommand, badgeState, installToolbar, isDisneyPage, toolbarLanguage } from '../extension/toolbar.mjs';
 
 for (const url of ['https://www.disneyplus.com/', 'https://www.disneyplus.com/ja-jp/play/test']) assert.ok(isDisneyPage(url));
 for (const url of ['http://www.disneyplus.com/', 'https://disneyplus.com/', 'https://www.disneyplus.com.evil.test/', 'https://www.disneyplus.com@evil.test/', 'https://user@www.disneyplus.com/', 'https://www.disneyplus.com:8443/', 'edge://extensions/', null]) assert.equal(isDisneyPage(url), false);
@@ -11,6 +11,15 @@ assert.equal(badgeState({mode: 'original'}).text, 'OFF');
 assert.equal(badgeState({mode: '4k-hdr10'}).text, 'DBG');
 assert.equal(badgeState({mode: '4k-hdr10-sdk-playready'}).text, '4K');
 assert.match(badgeState({reason: 'intel-gpu-required', failed: true}).title, /4Kは開始していません/);
+// Toolbar text follows the browser UI language: Japanese for ja, English otherwise.
+for (const [language, expected] of [['ja', 'ja'], ['ja-JP', 'ja'], ['en-US', 'en'], ['en', 'en'], ['fr-FR', 'en'], ['', 'ja']]) {
+  assert.equal(toolbarLanguage({i18n: {getUILanguage: () => language}}), expected, `UI language ${language}`);
+}
+assert.match(badgeState({mode: 'fullhd'}, 'en').title, /^Full HD request ON/);
+assert.match(badgeState({mode: 'original'}, 'en').title, /^Full HD request OFF/);
+assert.match(badgeState({mode: 'fullhd', failed: true}, 'en').title, /settings panel/);
+assert.equal(badgeState({mode: 'fullhd'}, 'en').text, 'HD', 'badge text is the same in both languages');
+assert.doesNotMatch(JSON.stringify(['fullhd', 'original', '4k-hdr10', '4k-hdr10-sdk-playready'].map((mode) => badgeState({mode}, 'en'))), /[぀-ヿ一-鿿]/, 'English titles contain no Japanese');
 
 const storage = () => {
   const data = new Map();
@@ -27,7 +36,7 @@ const runCommand = (context, command) => vm.runInContext(`(${applyPageCommand.to
   assert.equal(context.sessionStorage.getItem('ioridev.disneyplus.debug-ui.v1'), '1');
   assert.equal(runCommand(context, 'arbitrary-code').ok, false);
   assert.equal(runCommand(context, 'start-intel-4k').reason, 'reload-required');
-  assert.equal(context.sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.3'), null, 'missing/older helpers cannot arm an unchecked 4K ticket');
+  assert.equal(context.sessionStorage.getItem('ioridev.disneyplus4k.once.v0.5.4'), null, 'missing/older helpers cannot arm an unchecked 4K ticket');
   context.localStorage.setItem = () => {};
   assert.equal(runCommand(context, 'toggle-fullhd').ok, false, 'silent storage failure does not report ON');
   const foreign = makePage('https://example.test/');
@@ -82,6 +91,7 @@ function apiFixture() {
   assert.deepEqual(calls.menus[0].contexts, ['action']);
   assert.deepEqual(calls.menus[1].contexts, ['action']);
   assert.equal(calls.menus[1].id, 'disney-plus-enhanced-intel-4k');
+  assert.equal(calls.menus[0].title, '設定パネルを表示／非表示', 'an API without a UI language keeps Japanese');
   const sender = {id: api.runtime.id, frameId: 0, url: current.url, tab: {id: 7}};
   api.runtime.onMessage.fire({type: 'disney-plus-enhanced-status', state: {mode: 'fullhd', failed: true}}, sender);
   await Promise.resolve(); assert.equal(calls.badges.at(-1).text, '!');
@@ -147,5 +157,12 @@ function apiFixture() {
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0])), {type: 'disney-plus-enhanced-status', state: {mode: 'fullhd', failed: false}});
   for (const detail of ['x'.repeat(257), '{}', 'null', '{', JSON.stringify({mode: 'fullhd', failed: 'no'})]) emit({detail});
   assert.equal(sent.length, 1);
+}
+{
+  const {api, calls} = apiFixture();
+  api.i18n = {getUILanguage: () => 'en-US'};
+  installToolbar(api);
+  api.runtime.onInstalled.fire(); await Promise.resolve();
+  assert.deepEqual(calls.menus.map((menu) => menu.title), ['Show/hide the settings panel', 'Start 4K (for Intel GPUs, this page only)']);
 }
 console.log('Toolbar: toggle/fallback, debug without reload, URL/frame bounds, badge states, double-click/navigation races and display-only bridge passed.');

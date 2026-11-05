@@ -3,7 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const source = fs.readFileSync(new URL("../extension/DisneyPlus-Edge-Enhanced.user.js", import.meta.url), "utf8");
-const VERSION = "0.5.3";
+const VERSION = "0.5.4";
 const MODE = "1080p-hevc-single-sdr";
 const PROBE_MODE = "4k-hevc-sdr-manifest-probe";
 const HDR10_PROBE_MODE = "4k-hdr10-sdr-manifest-probe";
@@ -137,6 +137,7 @@ function createRuntime({
   outerFetchMode = "delegate",
   fetchProperty = "normal",
   sdkVersion = SDK_VERSION,
+  storedMode = mode === "fullhd" ? "fullhd" : "original",
 } = {}) {
   const callbacks = new Map();
   const timers = new Map();
@@ -167,7 +168,7 @@ function createRuntime({
     master,
   };
 
-  const localStorage = makeStorage([["ioridev.disneyplus4k.mode.v1", mode === "fullhd" ? "fullhd" : "original"]]);
+  const localStorage = makeStorage(storedMode === null ? [] : [["ioridev.disneyplus4k.mode.v1", storedMode]]);
   const sessionStorage = mode === "original" || mode === "fullhd"
     ? makeStorage()
     : makeStorage([[`ioridev.disneyplus4k.once.v${VERSION}`, JSON.stringify({
@@ -1383,6 +1384,24 @@ await runNormalMode();
   await assert.rejects(runtime.run("emESession.generateRequest('cenc', testInitData)"), (error) => error.name === 'AbortError');
 }
 
+// With no saved preference the page starts full-HD; a failure saves OFF so the
+// next load does not retry it.
+{
+  const runtime = createRuntime({mode: 'fullhd', storedMode: null});
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  assert.equal(control.getState().mode, 'fullhd', 'an unsaved preference starts full-HD');
+  await publishAndCreate(runtime);
+  await sendPlayback(runtime);
+  await fetchMasterAndMedia(runtime);
+  await prepareSession(runtime);
+  assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), null, 'starting does not write a preference');
+  const nativeFailure = new DOMException('Mock license failure', 'NotSupportedError');
+  runtime.updatePromise = Promise.reject(nativeFailure);
+  await assert.rejects(runtime.run('emESession.update(testLicense)'), (error) => error === nativeFailure);
+  await Promise.resolve();
+  assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'original', 'a failed default full-HD session saves OFF');
+}
+
 {
   const runtime = createRuntime({mode: 'fullhd'});
   await publishAndCreate(runtime);
@@ -1399,18 +1418,18 @@ await runNormalMode();
     'late errors from a retired page cannot disarm the next page');
 }
 
-// SDK 26.13.3 is accepted for the 1080p service override only; the flow is the
-// same mocked sequence as 26.10.0, not a real CDM playback result.
-{
-  const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.13.3-mbaku'});
+// SDKs 26.13.3 and 26.14.2 are accepted for the 1080p service override only; the
+// flow is the same mocked sequence as 26.10.0, not a real CDM playback result.
+for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala']) {
+  const runtime = createRuntime({mode: 'fullhd', sdkVersion});
   const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
   await publishAndCreate(runtime);
   await sendPlayback(runtime);
   await fetchMasterAndMedia(runtime);
   await prepareSession(runtime);
-  assert.equal(control.getState().failed, false, 'full-HD runs on the re-checked 26.13.3 service SDK');
+  assert.equal(control.getState().failed, false, `full-HD runs on the re-checked ${sdkVersion} service SDK`);
   assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'fullhd',
-    'the 26.13.3 service SDK does not disarm full-HD');
+    `the ${sdkVersion} service SDK does not disarm full-HD`);
 }
 // Disney+ may wrap window.Request in a forwarding Proxy after document start.
 {
@@ -1445,4 +1464,4 @@ await runNormalMode();
 }
 
 console.log('Normal full-HD: no duration cap, repeated SDK/POST/master and native key updates, fatal error disarm, page retirement, BFCache and SDK 26.13.3 acceptance passed (mock only).');
-console.log("single-variant runtime: normal-mode identity, v0.5.3 FHD 1080 and HEVC/HDR10 UHD SDR probe 2160 SDK config/recommendation, PlaybackSession UHD policy, one POST/SDK cap, fetch/XHR text+arraybuffer probe rejection, native EME/session arguments, and fail-closed generateRequest gates passed");
+console.log("single-variant runtime: normal-mode identity, v0.5.4 FHD 1080 and HEVC/HDR10 UHD SDR probe 2160 SDK config/recommendation, PlaybackSession UHD policy, one POST/SDK cap, fetch/XHR text+arraybuffer probe rejection, native EME/session arguments, and fail-closed generateRequest gates passed");
