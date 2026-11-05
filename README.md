@@ -46,10 +46,10 @@ These settings align the environment with the extension's operating requirements
 The same code is also available as a userscript. It has no toolbar icon: open the settings panel with the small button in the bottom-right corner of Disney+ or with `Alt+Shift+4`. The prerequisites above apply as well.
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) in Edge. If Tampermonkey asks for it, turn on **Allow user scripts** (or **Developer mode** on older Edge versions) for Tampermonkey in `edge://extensions`.
-2. Open the [install link](https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js) and click **Install** in Tampermonkey.
+2. Open the [Greasy Fork page](https://greasyfork.org/scripts/603993-disney-4khdr-enhanced), click **Install this script**, then click **Install** in Tampermonkey. You can also install it directly from GitHub with the [install link](https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js).
 3. Reload the Disney+ page.
 
-* Tampermonkey checks the same link for updates and installs new versions automatically.
+* Tampermonkey checks the place you installed from (Greasy Fork or GitHub) for updates and installs new versions automatically. Greasy Fork is synced from this repository.
 * Use either the extension or the userscript, not both: disable the one you do not use.
 
 ## Usage
