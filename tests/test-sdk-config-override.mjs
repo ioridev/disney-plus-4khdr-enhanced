@@ -9,7 +9,7 @@ const PLAYREADY_MODE = '1080p-hevc-sdk-playready';
 const UHD_PLAYREADY_MODE = '4k-hdr10-sdk-playready';
 const SDK_VERSION = '26.10.0-jasmine';
 const FHD_ONLY_SDK_VERSIONS = ['26.13.3-mbaku', '26.14.2-nala'];
-const SCRIPT_VERSION = '0.5.6';
+const SCRIPT_VERSION = '0.5.7';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const OLD_MODES = [
   '1080p-hevc-hw-persistent',

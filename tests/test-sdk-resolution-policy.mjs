@@ -9,7 +9,7 @@ const SDK_MODE = process.argv[2] ?? MODE_HDR10;
 assert.ok([MODE_HDR10, MODE_SDR].includes(SDK_MODE),
   `usage: node tests/test-sdk-resolution-policy.mjs <${MODE_HDR10}|${MODE_SDR}>`);
 const SDK_VERSION = '26.10.0-jasmine';
-const SCRIPT_VERSION = '0.5.6';
+const SCRIPT_VERSION = '0.5.7';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const DOCUMENT_URL = 'https://www.disneyplus.com/ja-jp/play/sdk-resolution-policy-test';
 const PLAYBACK_SCENARIO = SDK_MODE === MODE_HDR10 ? 'tv-drm-ctr-h265-hdr10-atmos' : 'tv-drm-ctr-h265-atmos';
@@ -261,7 +261,7 @@ const makeOverlayDocument = () => {
     set innerHTML(_value) {},
     querySelector: (selector) => nodes.get(selector) || node(selector),
     querySelectorAll: (selector) => selector === '.choice'
-      ? ['fullhd', 'original'].map((mode) => Object.assign(nodes.get(`.choice:${mode}`) || node(`.choice:${mode}`), {dataset: {mode}}))
+      ? ['fullhd', 'original', MODE_HDR10].map((mode) => Object.assign(nodes.get(`.choice:${mode}`) || node(`.choice:${mode}`), {dataset: {mode}}))
       : [],
   };
   for (const selector of selectors) node(selector);
@@ -289,6 +289,8 @@ const createRuntime = ({
   documentElement = false,
   eme = 'valid',
   language = null,
+  webgl = null,
+  webgpu = null,
 } = {}) => {
   const callbacks = new Map();
   const localStorage = makeStorage([['ioridev.disneyplus4k.mode.v1', SDK_MODE]]);
@@ -336,6 +338,7 @@ const createRuntime = ({
     }
     ${eme === 'valid' ? `globalThis.navigator = new TestNavigator();` : ''}
     ${language ? `Object.defineProperty(globalThis.navigator, 'language', {value: ${JSON.stringify(language)}, configurable: true});` : ''}
+    ${webgpu ? `globalThis.webgpuAsked = []; Object.defineProperty(globalThis.navigator, 'gpu', {value: {requestAdapter: async (options) => { webgpuAsked.push(options.powerPreference); return {info: ${JSON.stringify(webgpu)}[options.powerPreference]}; }}, configurable: true});` : ''}
 
     globalThis.nativeConstructorCalls = [];
     globalThis.nativeConstructorError = new Error('native PlaybackSession failure');
@@ -397,6 +400,16 @@ const createRuntime = ({
       return {playbackServiceVersion: ${JSON.stringify(SDK_VERSION)}, mediaCapabilities: {videoResolutions: ['SD', 'HD']}};
     };
   `, context);
+  if (webgl) {
+    // detectGpuVendor creates its canvas through the same document as the overlay host.
+    const createElement = fakeDocument.createElement;
+    fakeDocument.createElement = (tag) => tag === 'canvas' ? {getContext: () => ({
+      getExtension: (name) => name === 'WEBGL_debug_renderer_info'
+        ? {UNMASKED_VENDOR_WEBGL: 1, UNMASKED_RENDERER_WEBGL: 2}
+        : {loseContext() {}},
+      getParameter: () => webgl,
+    })} : createElement?.(tag);
+  }
   vm.runInContext(source, context);
   const overlayEvents = overlayDocument ? overlayDocument.events : null;
   const overlayNodes = overlayDocument ? overlayDocument.nodes : null;
@@ -734,15 +747,18 @@ for (const sessionKind of ['accessor', 'data']) {
     'UHD environment check does not issue a second native EME capability query');
 }
 
-// The everyday panel offers only Full HD / OFF; any other mode (the Intel 4K
-// mode or a diagnostic one) opens the developer section. Switching saves the choice and reloads once.
+// The everyday panel offers Full HD / OFF, and 4K only on an Intel 4K page or
+// after the Intel check passed. A diagnostic mode opens the developer section.
+// Switching saves the choice and reloads once.
 {
   const runtime = createRuntime({sessionKind: 'accessor', documentElement: true});
   const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
   assert.equal(control.getState().mode, SDK_MODE);
   control.toggleDebug();
-  assert.equal(runtime.overlayNodes.get('.dev').open, true, 'a mode outside Full HD / OFF opens the developer section');
   const intel = SDK_MODE === MODE_HDR10;
+  assert.equal(runtime.overlayNodes.get('.dev')?.open === true, !intel, 'only a diagnostic mode opens the developer section');
+  assert.equal(runtime.overlayNodes.get(`.choice:${MODE_HDR10}`).hidden, !intel, 'the 4K choice shows on the Intel 4K page');
+  if (intel) assert.match(runtime.overlayNodes.get('.status').textContent, /このページだけ/);
   assert.equal(runtime.overlayNodes.get('.badge').textContent, intel ? '4K' : 'DBG');
   assert.match(runtime.overlayNodes.get('.summary').textContent, intel ? /Intel向け4K/ : /診断モード/);
   let reloads = 0;
@@ -764,26 +780,29 @@ for (const sessionKind of ['accessor', 'data']) {
   const summary = runtime.overlayNodes.get('.summary').textContent;
   const status = runtime.overlayNodes.get('.status').textContent;
   assert.match(summary, SDK_MODE === MODE_HDR10 ? /^Intel 4K request/ : /^Diagnostic mode/);
-  assert.match(status, /choose Full HD or OFF/);
+  assert.match(status, SDK_MODE === MODE_HDR10 ? /This page only/ : /choose Full HD or OFF/);
   assert.doesNotMatch(summary + status, /[\u3040-\u30ff\u4e00-\u9fff]/, 'no Japanese in the English everyday panel');
 }
 
-for (const vendor of ['Intel', 'NVIDIA', 'AMD', 'unknown']) {
-  const runtime = createRuntime();
+const INTEL_ADAPTERS = {'high-performance': {vendor: 'intel'}, 'low-power': {vendor: 'intel'}};
+for (const [vendor, webgpu] of [['Intel', INTEL_ADAPTERS], ['NVIDIA', INTEL_ADAPTERS], ['AMD', INTEL_ADAPTERS], ['unknown', INTEL_ADAPTERS],
+  ['Intel', {'high-performance': {vendor: 'amd'}, 'low-power': {vendor: 'intel'}}], ['Intel', null]]) {
+  const runtime = createRuntime({webgpu});
   runtime.context.document.createElement = () => ({getContext: () => ({
     getExtension: (name) => name === 'WEBGL_debug_renderer_info'
       ? {UNMASKED_VENDOR_WEBGL: 1, UNMASKED_RENDERER_WEBGL: 2}
       : {loseContext() {}},
     getParameter: () => vendor,
   })});
-  const outcome = runtime.context.__DisneyPlusEdgeEnhancedToolbar.prepareIntel4k();
-  assert.equal(outcome.ok, vendor === 'Intel');
-  if (vendor === 'Intel') {
+  const eligible = vendor === 'Intel' && webgpu === INTEL_ADAPTERS;
+  const outcome = await runtime.context.__DisneyPlusEdgeEnhancedToolbar.prepareIntel4k();
+  assert.equal(outcome.ok, eligible);
+  if (eligible) {
     const ticket = JSON.parse(runtime.sessionStorage.getItem(TICKET_KEY));
     assert.equal(ticket.mode, MODE_HDR10, 'the menu uses the exact successful mode, not the 30s single-variant experiment');
     assert.equal(ticket.requireIntelGpu, true);
     assert.equal(runtime.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'original');
-    assert.equal(runtime.context.__DisneyPlusEdgeEnhancedToolbar.prepareIntel4k().ok, false, 'no double arming');
+    assert.equal((await runtime.context.__DisneyPlusEdgeEnhancedToolbar.prepareIntel4k()).ok, false, 'no double arming');
   } else {
     assert.equal(outcome.reason, 'intel-gpu-required');
     assert.equal(runtime.sessionStorage.getItem(TICKET_KEY), null);
@@ -791,6 +810,38 @@ for (const vendor of ['Intel', 'NVIDIA', 'AMD', 'unknown']) {
   }
   assert.equal(runtimeJson(runtime, 'nativeEmeCalls.length'), 0, 'selecting the menu does not perform a license/CDM probe');
 }
+// The panel's 4K choice appears only after the check passes, and arms the same one-page ticket.
+let panel4kCases = 0;
+for (const [vendor, webgpu, shown] of [
+  ['Google Inc. (AMD) ANGLE (AMD, AMD Radeon RX 9070)', INTEL_ADAPTERS, false],
+  ['Google Inc. (Intel) ANGLE (Intel, Intel(R) Iris(R) Xe Graphics)', {'high-performance': {vendor: 'amd'}, 'low-power': {vendor: 'intel'}}, false],
+  ['Google Inc. (Intel) ANGLE (Intel, Intel(R) Iris(R) Xe Graphics)', {'high-performance': {vendor: 'nvidia'}, 'low-power': {vendor: 'intel'}}, true],
+]) {
+  const runtime = createRuntime({sessionKind: 'accessor', documentElement: true, webgl: vendor, webgpu});
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  if (control.getState().mode === MODE_HDR10) continue; // covered by the everyday panel block
+  const choice = runtime.overlayNodes.get(`.choice:${MODE_HDR10}`);
+  assert.equal(choice.hidden, true, 'hidden before the panel is opened');
+  assert.equal(runtimeJson(runtime, 'webgpuAsked.length'), 0, 'nothing is probed until the panel opens');
+  runtime.localStorage.setItem('ioridev.disneyplus4k.mode.v1', 'fullhd');
+  control.toggleDebug();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  panel4kCases++;
+  assert.equal(choice.hidden, !shown, vendor);
+  assert.equal(runtimeJson(runtime, 'webgpuAsked.length'), vendor.includes('Intel') ? 2 : 0, 'WebGPU is asked only after WebGL says Intel');
+  if (!shown) continue;
+  let reloads = 0;
+  runtime.context.location.reload = () => { reloads++; };
+  runtime.overlayEvents.get(`.choice:${MODE_HDR10}:click`)();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.equal(reloads, 1, 'the 4K choice reloads once');
+  const ticket = JSON.parse(runtime.sessionStorage.getItem(TICKET_KEY));
+  assert.deepEqual([ticket.mode, ticket.requireIntelGpu, ticket.returnMode], [MODE_HDR10, true, 'fullhd']);
+  assert.equal(runtime.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'original', 'OFF while the ticket is pending');
+  assert.equal(runtimeJson(runtime, 'nativeEmeCalls.length'), 0, 'the panel check does not touch EME');
+}
+assert.equal(panel4kCases, SDK_MODE === MODE_HDR10 ? 0 : 3, 'the panel 4K cases ran');
+
 if (SDK_MODE === MODE_HDR10) {
   const runtime = createRuntime();
   const outcome = runtime.context.__DisneyPlusEdgeEnhancedToolbar.prepareToggle();

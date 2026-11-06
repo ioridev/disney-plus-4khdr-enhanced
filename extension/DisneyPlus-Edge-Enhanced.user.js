@@ -7,7 +7,7 @@
 // @downloadURL  https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js
 // @updateURL    https://raw.githubusercontent.com/ioridev/disney-plus-4khdr-enhanced/main/extension/DisneyPlus-Edge-Enhanced.user.js
 // @license      MIT
-// @version      0.5.6
+// @version      0.5.7
 // @description  Full-HD request mode and optional playback diagnostics for Disney+ on Windows Edge. Alt+Shift+4 opens the panel. Does not bypass DRM.
 // @description:ja Disney+のフルHD要求モードと任意表示の再生診断。Alt+Shift+4でパネルを開閉します。DRMは回避しません。
 // @match        https://www.disneyplus.com/*
@@ -20,9 +20,9 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.5.6";
+  const VERSION = "0.5.7";
   const STORAGE_KEY = "ioridev.disneyplus4k.mode.v1";
-  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.6";
+  const TEST_TICKET_KEY = "ioridev.disneyplus4k.once.v0.5.7";
   const CHECKPOINT_KEY = "ioridev.disneyplus4k.checkpoint.v1";
   const DEFAULT_MODE = "original";
   // Used only while no request mode has been saved. A saved "original" (OFF,
@@ -1846,6 +1846,32 @@ function createSingleVariantNetworkAdapter({
     }
   }
 
+  // The everyday 4K choice needs more than the WebGL hint: on a PC with a
+  // second GPU, Edge may draw with Intel while the monitor is wired to the
+  // other GPU. WebGPU names the high-performance and low-power adapters
+  // without creating a device. Any AMD adapter (AMD 4K/HDR output paths froze
+  // PCs in testing), a fallback adapter or an unanswered query hides 4K. Still
+  // a hint, not a probe of the protected-video output path.
+  async function checkIntel4kEligibility(webglVendor, gpu) {
+    if (webglVendor !== "intel") return "webgl-not-intel";
+    if (!gpu || typeof gpu.requestAdapter !== "function") return "webgpu-unavailable";
+    const vendors = [];
+    for (const powerPreference of ["high-performance", "low-power"]) {
+      let vendor;
+      try {
+        const adapter = await gpu.requestAdapter({ powerPreference });
+        if (!adapter) return "webgpu-unavailable";
+        const info = adapter.info;
+        if (adapter.isFallbackAdapter === true || info?.isFallbackAdapter === true) return "webgpu-unavailable";
+        vendor = typeof info?.vendor === "string" ? info.vendor.slice(0, 64).toLowerCase() : "";
+      } catch (_) { return "webgpu-unavailable"; }
+      vendors.push(vendor);
+    }
+    if (vendors.some((vendor) => /amd|\bati\b|radeon|advanced micro/.test(vendor))) return "amd-adapter";
+    if (!vendors.includes("intel") || !vendors.every((vendor) => vendor === "intel" || vendor === "nvidia")) return "webgpu-unknown";
+    return "eligible";
+  }
+
   function consumeStartupMode(localStore, sessionStore, documentUrl, now, navigationType, gpuProbe = () => "unknown") {
     // Consume before any EME/network hook or playback can run. A crash during the
     // test cannot reuse this ticket on a later document, including session restore.
@@ -1868,14 +1894,17 @@ function createSingleVariantNetworkAdapter({
           && navigationType === "reload" && ticket.documentUrl === documentUrl && Number.isFinite(now) && Number.isFinite(ticket.createdAt)
           && now >= ticket.createdAt && now - ticket.createdAt < TEST_TICKET_TTL_MS
           && localStore.getItem(STORAGE_KEY) === DEFAULT_MODE) {
-          storeMode(localStore, DEFAULT_MODE);
+          // Only this page runs 4K; the next load uses the earlier choice again.
+          storeMode(localStore, intel4kReturnMode(ticket));
           if (ticket.requireIntelGpu === true && (ticket.mode !== INTEL_4K_MODE || gpuProbe() !== "intel")) {
             return { mode: DEFAULT_MODE, showDebug: true, notice: "再読み込み後にIntel GPUを確認できないため、4Kを開始せず無変更に戻しました。" };
           }
           return { mode: ticket.mode, notice: "今回のページのみ実験中。再読込・再起動後は無変更。次のページへ実験設定を引き継ぎません。" };
         }
         // A stale or malformed experimental ticket must never select another
-        // saved request mode as an implicit fallback.
+        // saved request mode as an implicit fallback for this page. The next
+        // load may use the Full HD choice that the Intel 4K page set aside.
+        if (ticket?.version === VERSION && localStore.getItem(STORAGE_KEY) === DEFAULT_MODE) storeMode(localStore, intel4kReturnMode(ticket));
         return { mode: DEFAULT_MODE, notice: "実験の開始票が期限切れ・無効のため、無変更で起動しました。" };
       }
       return { mode, notice };
@@ -1884,21 +1913,30 @@ function createSingleVariantNetworkAdapter({
     }
   }
 
+  function intel4kReturnMode(ticket) {
+    return ticket?.requireIntelGpu === true && ticket.mode === INTEL_4K_MODE && ticket.returnMode === "fullhd" ? "fullhd" : DEFAULT_MODE;
+  }
+
   function prepareModeReload(mode, localStore, sessionStore, documentUrl, now, requireIntelGpu = false) {
     if (!Object.prototype.hasOwnProperty.call(MODE_PLANS, mode)) return { reload: false, notice: "未知のモードです。" };
     if (requireIntelGpu && mode !== INTEL_4K_MODE) return { reload: false, notice: "Intel向け4K以外のモードです。" };
+    let returnMode = null;
     try {
       clearTestTicket(sessionStore);
       if (isExperimentalMode(mode)) {
         if (typeof documentUrl !== "string" || new URL(documentUrl).origin !== "https://www.disneyplus.com" || !Number.isFinite(now)) throw new Error("Invalid context");
+        // Full HD (saved or the unsaved default) comes back after the Intel 4K page.
+        const previous = localStore.getItem(STORAGE_KEY);
+        if (requireIntelGpu && (previous === "fullhd" || previous === null)) returnMode = "fullhd";
         storeMode(localStore, DEFAULT_MODE);
-        const ticket = JSON.stringify({ version: VERSION, mode, documentUrl, createdAt: now, ...(requireIntelGpu ? { requireIntelGpu: true } : {}) });
+        const ticket = JSON.stringify({ version: VERSION, mode, documentUrl, createdAt: now, ...(requireIntelGpu ? { requireIntelGpu: true } : {}), ...(returnMode ? { returnMode } : {}) });
         sessionStore.setItem(TEST_TICKET_KEY, ticket);
         if (sessionStore.getItem(TEST_TICKET_KEY) !== ticket) throw new Error("Ticket persistence failed");
       } else storeMode(localStore, mode);
       return { reload: true, notice: "設定を確認しました。再読込中…" };
     } catch (_) {
       try { clearTestTicket(sessionStore); } catch (_) { /* Fail closed for this document. */ }
+      if (returnMode) try { storeMode(localStore, returnMode); } catch (_) { /* OFF stays saved. */ }
       return { reload: false, notice: "設定を安全に保存できないため切替を中止しました。実験を終了するにはタブを閉じてください。" };
     }
   }
@@ -2381,6 +2419,7 @@ function createSingleVariantNetworkAdapter({
       prepareModeReload,
       classifyGpuVendor,
       detectGpuVendor,
+      checkIntel4kEligibility,
       INTEL_4K_MODE,
       checkpointPhase,
       readCheckpoint,
@@ -2410,6 +2449,14 @@ function createSingleVariantNetworkAdapter({
     return gpuVendorHint;
   }
 
+  // Declared before any overlay can mount (no temporal dead zone).
+  let intel4kChoiceCheck = null;
+  let intel4kArming = false;
+  async function probeIntel4kEligibility() {
+    try { return await checkIntel4kEligibility(probeGpuVendor(), globalThis.navigator?.gpu); }
+    catch (_) { return "webgpu-unavailable"; }
+  }
+
   function readStartup() {
     try {
       const navigationType = globalThis.performance?.getEntriesByType?.("navigation")?.[0]?.type;
@@ -2424,6 +2471,7 @@ function createSingleVariantNetworkAdapter({
     mode: startup.mode,
     guardNotice: startup.notice,
     switchNotice: "",
+    intel4kEligibility: "not-checked",
     modeReloadPending: false,
     retiredDocument: false,
     previousCheckpoint: null,
@@ -3833,7 +3881,7 @@ function createSingleVariantNetworkAdapter({
 
   // Everyday panel: Full HD / OFF only. Diagnostic modes stay in the collapsed
   // developer section.
-  const USER_MODES = Object.freeze(["fullhd", DEFAULT_MODE]);
+  const USER_MODES = Object.freeze(["fullhd", DEFAULT_MODE, INTEL_4K_MODE]);
   const LAUNCHER_IDLE_MS = 3000;
 
   // The everyday panel follows the browser language: Japanese for ja, English
@@ -3864,6 +3912,10 @@ function createSingleVariantNetworkAdapter({
       switchFailed: "設定を保存できなかったため、切り替えていません。",
       reloadFailed: "ページを再読み込みできませんでした。実験を終了するにはタブを閉じてください。",
       intelRequired: "Intel GPUを確認できなかったため、4Kは開始していません。",
+      intel4kChoice: "4K（Intel・このページのみ）",
+      intel4kStatus: "4K（HDR10）の映像を要求します。このページだけで、再読み込みすると元の設定に戻ります。",
+      amdFound: "AMDのGPUも見つかったため、4Kは開始していません。AMDを通る4K/HDRでは、PCのフリーズが起きています。",
+      gpuUnchecked: "GPUの構成を確認できなかったため、4Kは開始していません。",
       waiting: "再生開始待ち", paused: "（一時停止中）", drops: "フレーム落ち",
     }),
     en: Object.freeze({
@@ -3885,6 +3937,10 @@ function createSingleVariantNetworkAdapter({
       switchFailed: "The setting could not be saved, so nothing was changed.",
       reloadFailed: "The page could not be reloaded. Close the tab to end the test.",
       intelRequired: "4K was not started because an Intel GPU could not be confirmed.",
+      intel4kChoice: "4K (Intel, this page only)",
+      intel4kStatus: "Requests the 4K (HDR10) video. This page only: reloading returns to your previous setting.",
+      amdFound: "4K was not started because an AMD GPU was also found. 4K/HDR through AMD has frozen PCs.",
+      gpuUnchecked: "4K was not started because the GPU setup could not be checked.",
       waiting: "Waiting for playback", paused: " (paused)", drops: "dropped frames",
     }),
   });
@@ -3908,6 +3964,7 @@ function createSingleVariantNetworkAdapter({
     if (state.playbackBlocked || state.singleVariantFailed) return UI_TEXT.stopped;
     if (plan.continuousFhd) return state.singleVariantAccepted ? UI_TEXT.fullhdSelected : UI_TEXT.fullhdWaiting;
     if (state.mode === DEFAULT_MODE) return UI_TEXT.originalStatus;
+    if (state.mode === INTEL_4K_MODE) return UI_TEXT.intel4kStatus;
     return UI_LANGUAGE === "ja" ? `${plan.label}。${UI_TEXT.diagnosticStatus}` : UI_TEXT.diagnosticStatus;
   }
 
@@ -3945,6 +4002,8 @@ function createSingleVariantNetworkAdapter({
     state.overlay.launcher.dataset.tone = badge.tone;
     elements.summary.textContent = describeUserMode();
     for (const choice of elements.choices) {
+      // 4K is offered only after the Intel check passed on this page.
+      if (choice.dataset.mode === INTEL_4K_MODE) choice.hidden = state.mode !== INTEL_4K_MODE && state.intel4kEligibility !== "eligible";
       choice.setAttribute("aria-checked", String(choice.dataset.mode === state.mode));
       choice.disabled = state.modeReloadPending;
     }
@@ -4053,6 +4112,8 @@ function createSingleVariantNetworkAdapter({
         .choice:hover { background:rgba(249,249,249,.12); }
         .choice[aria-checked="true"] { background:#f9f9f9; color:#0e0e12; }
         .choice:disabled { cursor:default; opacity:.6; }
+        .choice-4k { grid-column:1 / -1; }
+        .choices:has(.choice-4k:not([hidden])) { border-radius:22px; }
         .status { margin:0 0 12px; font-size:13px; color:#dbdcde; }
         dl { margin:0; display:grid; grid-template-columns:92px minmax(0,1fr); gap:6px 10px; font-size:13px; }
         dt { color:#a8a9ad; }
@@ -4082,6 +4143,7 @@ function createSingleVariantNetworkAdapter({
           <div class="choices" role="radiogroup" aria-label="${UI_TEXT.group}">
             <button class="choice" type="button" role="radio" data-mode="fullhd">${UI_TEXT.fullhd}</button>
             <button class="choice" type="button" role="radio" data-mode="original">${UI_TEXT.original}</button>
+            <button class="choice choice-4k" type="button" role="radio" data-mode="${INTEL_4K_MODE}" hidden>${UI_TEXT.intel4kChoice}</button>
           </div>
           <p class="status" role="status"></p>
           <dl>
@@ -4194,15 +4256,20 @@ function createSingleVariantNetworkAdapter({
       state.modeReloadPending = outcome.reload;
       renderOverlay();
       // Never switch the live EME/request policy midway through an old session.
-      if (outcome.reload) {
-        try { location.reload(); }
-        catch (_) {
-          safelyObserve(() => clearTestTicket(sessionStorage));
-          state.modeReloadPending = false;
-          state.guardNotice = "再読込を開始できませんでした。実験を終了するにはタブを閉じてください。";
-          state.switchNotice = localNotice(state.guardNotice, "reloadFailed");
-          renderOverlay();
-        }
+      if (outcome.reload) reloadNow();
+    };
+    const reloadNow = () => {
+      try { location.reload(); }
+      catch (_) {
+        safelyObserve(() => {
+          const ticket = JSON.parse(sessionStorage.getItem(TEST_TICKET_KEY) || "null");
+          clearTestTicket(sessionStorage);
+          if (intel4kReturnMode(ticket) === "fullhd") storeMode(localStorage, "fullhd");
+        });
+        state.modeReloadPending = false;
+        state.guardNotice = "再読込を開始できませんでした。実験を終了するにはタブを閉じてください。";
+        state.switchNotice = localNotice(state.guardNotice, "reloadFailed");
+        renderOverlay();
       }
     };
     elements.mode.addEventListener("change", () => switchMode(elements.mode.value));
@@ -4210,6 +4277,10 @@ function createSingleVariantNetworkAdapter({
       choice.addEventListener("click", () => {
         // Re-selecting a working mode does nothing; after a failure it re-arms full-HD.
         if (choice.dataset.mode === state.mode && !state.playbackBlocked && !state.singleVariantFailed) return;
+        if (choice.dataset.mode === INTEL_4K_MODE) {
+          void armIntel4k().then((outcome) => { if (outcome.reload) reloadNow(); });
+          return;
+        }
         switchMode(choice.dataset.mode);
       });
     }
@@ -4235,6 +4306,50 @@ function createSingleVariantNetworkAdapter({
     if (!state.overlay) return;
     state.overlay.panel.hidden = !state.debugVisible;
     state.overlay.launcher.hidden = state.debugVisible;
+    if (state.debugVisible) refreshIntel4kChoice();
+  }
+
+  // Checked once per page, only after the panel is opened.
+  function refreshIntel4kChoice() {
+    if (intel4kChoiceCheck) return intel4kChoiceCheck;
+    state.intel4kEligibility = "checking";
+    intel4kChoiceCheck = probeIntel4kEligibility().then((result) => {
+      state.intel4kEligibility = result;
+      renderOverlay();
+      return result;
+    });
+    return intel4kChoiceCheck;
+  }
+
+  async function armIntel4k() {
+    if (state.modeReloadPending || intel4kArming) return { ok: false, reason: "reload-pending" };
+    intel4kArming = true;
+    try {
+      const eligibility = await probeIntel4kEligibility();
+      state.intel4kEligibility = eligibility;
+      if (state.modeReloadPending) return { ok: false, reason: "reload-pending" };
+      if (eligibility !== "eligible") {
+        if (eligibility === "amd-adapter") {
+          state.guardNotice = PANEL_TEXT.ja.amdFound;
+          state.switchNotice = UI_TEXT.amdFound;
+        } else if (eligibility === "webgl-not-intel") {
+          state.guardNotice = `4Kは開始していません。WebGLのGPU分類: ${gpuVendorHint}。Intelを確認できる場合だけ通常メニューから4Kを開始できます。描画GPUと保護映像のデコード・表示経路は一致するとは限りません。`;
+          state.switchNotice = localNotice(state.guardNotice, "intelRequired");
+        } else {
+          state.guardNotice = `${PANEL_TEXT.ja.gpuUnchecked}（WebGPU: ${eligibility}）`;
+          state.switchNotice = UI_TEXT.gpuUnchecked;
+        }
+        setDebugVisibility(true);
+        renderOverlay();
+        return { ok: false, reason: "intel-gpu-required" };
+      }
+      const outcome = prepareModeReload(INTEL_4K_MODE, localStorage, sessionStorage, location.href, Date.now(), true);
+      state.modeReloadPending = outcome.reload;
+      state.guardNotice = outcome.notice;
+      state.switchNotice = outcome.reload ? "" : localNotice(outcome.notice, "switchFailed");
+      renderOverlay();
+      return { ok: outcome.reload, reload: outcome.reload, mode: INTEL_4K_MODE };
+    } finally { intel4kArming = false; }
   }
 
   function toolbarState() {
@@ -4264,22 +4379,8 @@ function createSingleVariantNetworkAdapter({
     value: Object.freeze({
       getState: toolbarState,
       toggleDebug: () => setDebugVisibility(!state.debugVisible),
-      prepareIntel4k: () => {
-        if (state.modeReloadPending) return { ok: false, reason: "reload-pending" };
-        if (probeGpuVendor() !== "intel") {
-          state.guardNotice = `4Kは開始していません。WebGLのGPU分類: ${gpuVendorHint}。Intelを確認できる場合だけ通常メニューから4Kを開始できます。描画GPUと保護映像のデコード・表示経路は一致するとは限りません。`;
-          state.switchNotice = localNotice(state.guardNotice, "intelRequired");
-          setDebugVisibility(true);
-          renderOverlay();
-          return { ok: false, reason: "intel-gpu-required" };
-        }
-        const outcome = prepareModeReload(INTEL_4K_MODE, localStorage, sessionStorage, location.href, Date.now(), true);
-        state.modeReloadPending = outcome.reload;
-        state.guardNotice = outcome.notice;
-        state.switchNotice = outcome.reload ? "" : localNotice(outcome.notice, "switchFailed");
-        renderOverlay();
-        return { ok: outcome.reload, reload: outcome.reload, mode: INTEL_4K_MODE };
-      },
+      // Async: scripting.executeScript waits for the promise. Same check as the panel.
+      prepareIntel4k: () => armIntel4k(),
       prepareToggle: () => {
         if (state.modeReloadPending) return { ok: false, reason: "reload-pending" };
         const enabled = getModePlan(state.mode).continuousFhd || state.mode === INTEL_4K_MODE;

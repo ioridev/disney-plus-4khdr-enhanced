@@ -3,7 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const source = fs.readFileSync(new URL("../extension/DisneyPlus-Edge-Enhanced.user.js", import.meta.url), "utf8");
-const VERSION = "0.5.6";
+const VERSION = "0.5.7";
 const MODE = "1080p-hevc-single-sdr";
 const PROBE_MODE = "4k-hevc-sdr-manifest-probe";
 const HDR10_PROBE_MODE = "4k-hdr10-sdr-manifest-probe";
@@ -1464,4 +1464,4 @@ for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala']) {
 }
 
 console.log('Normal full-HD: no duration cap, repeated SDK/POST/master and native key updates, fatal error disarm, page retirement, BFCache and SDK 26.13.3 acceptance passed (mock only).');
-console.log("single-variant runtime: normal-mode identity, v0.5.6 FHD 1080 and HEVC/HDR10 UHD SDR probe 2160 SDK config/recommendation, PlaybackSession UHD policy, one POST/SDK cap, fetch/XHR text+arraybuffer probe rejection, native EME/session arguments, and fail-closed generateRequest gates passed");
+console.log("single-variant runtime: normal-mode identity, v0.5.7 FHD 1080 and HEVC/HDR10 UHD SDR probe 2160 SDK config/recommendation, PlaybackSession UHD policy, one POST/SDK cap, fetch/XHR text+arraybuffer probe rejection, native EME/session arguments, and fail-closed generateRequest gates passed");

@@ -59,7 +59,8 @@ The same code is also available as a userscript. It has no toolbar icon: open th
 - **Right-click icon**: Select "Start 4K (for Intel GPUs, this page only)" or "Show/Hide Settings Panel" (`Alt+Shift+4` can also toggle the panel).
 - **Language**: The settings panel, toolbar tooltips and menu follow the browser language: Japanese for Japanese, English otherwise. The collapsed 開発者向け診断 (developer diagnostics) section stays in Japanese.
 - **Settings panel**: Switch between "Full HD (recommended)" and "OFF (Disney+ default)", see the resolution of the video that is playing, and use "Copy diagnostics" for bug reports. Diagnostic modes and detailed logs are in the collapsed 開発者向け診断 (developer diagnostics) section. When you close the panel, a small button showing the current state (for example "HD ▲") stays in the bottom-right corner; click it to reopen the panel. On the player it sits above the Disney+ control bar and hides after 3 seconds without mouse movement.
-- **4K mode behavior**: The 4K request is active for the current page only and reverts to OFF upon reload. The extension uses WebGL to detect the GPU, but this does not guarantee physical video output routing.
+- **4K in the settings panel**: On an Intel PC, the panel also shows "4K (Intel, this page only)". It appears only when Edge draws with an Intel GPU and no AMD GPU is found (WebGL and WebGPU are checked when you open the panel). If the check cannot be completed, it does not appear. The right-click "Start 4K" uses the same check.
+- **4K mode behavior**: The 4K request is active for the current page only. After a reload, the previous setting (Full HD or OFF) is used again. The GPU check does not guarantee physical video output routing. On the current Disney+ player SDK (26.14.2), the 4K mode stops before playback (see the note above).
 
 | Badge | State |
 | --- | --- |
