@@ -2,7 +2,7 @@
 
 Disney+ 4KHDR Enhancedの独自コードは[MIT License](LICENSE)で公開しています。Disney+ / Microsoft / GPUメーカーとの提携・承認を示すものではありません。各名称・商標はそれぞれの権利者に属します。
 
-READMEのヘッダー画像は本プロジェクト用にAI生成したイラストです。公式ロゴや作品映像ではなく、製品・サービスとの提携を示すものではありません。
+READMEのヘッダー画像は、本プロジェクト用にHTML/CSS/SVGで作成した画像です（元データはリポジトリの `docs/assets/readme-banner-4khdr.html`）。Windowsの標準フォント（Segoe UI Variable）と図形だけで描いており、Disney+の公式ロゴ・フォント・作品画像は使っていません。製品・サービスとの提携を示すものではありません。
 
 調査中には、次の公開資料・先行実装を参照しました。
 
