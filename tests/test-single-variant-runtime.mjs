@@ -1418,9 +1418,9 @@ await runNormalMode();
     'late errors from a retired page cannot disarm the next page');
 }
 
-// SDKs 26.13.3, 26.14.2 and 26.15.0 are accepted for the 1080p service override only; the
+// SDKs 26.13.3, 26.14.2, 26.15.0, 26.16.0 and 26.16.1 are accepted for the 1080p service override only; the
 // flow is the same mocked sequence as 26.10.0, not a real CDM playback result.
-for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala', '26.15.0-owl']) {
+for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala', '26.15.0-owl', '26.16.0-piglet', '26.16.1-piglet']) {
   const runtime = createRuntime({mode: 'fullhd', sdkVersion});
   const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
   await publishAndCreate(runtime);

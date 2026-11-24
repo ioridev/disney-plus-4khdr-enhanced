@@ -62,7 +62,7 @@
   // Service SDKs whose createPlaybackSession and clientParameters.configOverrides
   // ["hive-dmp"] merge were statically re-checked for the 1080p override path.
   // The UHD session constructor hook stays pinned to SUPPORTED_PLAYBACK_SDK.
-  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku", "26.14.2-nala", "26.15.0-owl"]);
+  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku", "26.14.2-nala", "26.15.0-owl", "26.16.0-piglet", "26.16.1-piglet"]);
   const FULLHD_SDR_BLOCKED_VIDEO_FORMATS = Object.freeze([
     "HEVC_HDR10",
     "HEVC_HDR10_PLUS",
