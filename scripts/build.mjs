@@ -13,10 +13,10 @@ const transport = read('src/single-variant-network.mjs')
 assert.doesNotMatch(selector + transport, /^export\s/m);
 const block = `  // SINGLE_VARIANT_MODULES_START
   // Generated from src/hls-single-variant.mjs and src/single-variant-network.mjs.
-  const { selectSingleFhdVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter } = (() => {
+  const { selectSingleFhdVariant, selectSingleFhdSdrVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter } = (() => {
 ${selector}
 ${transport}
-    return { selectSingleFhdVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter };
+    return { selectSingleFhdVariant, selectSingleFhdSdrVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter };
   })();
   // SINGLE_VARIANT_MODULES_END`;
 assert.equal((source.match(/  \/\/ SINGLE_VARIANT_MODULES_START/g) || []).length, 1);

@@ -8,7 +8,7 @@ const NATIVE_CAP_MODE = '1080p-hevc-native-cap';
 const PLAYREADY_MODE = '1080p-hevc-sdk-playready';
 const UHD_PLAYREADY_MODE = '4k-hdr10-sdk-playready';
 const SDK_VERSION = '26.10.0-jasmine';
-const FHD_ONLY_SDK_VERSIONS = ['26.13.3-mbaku', '26.14.2-nala'];
+const FHD_ONLY_SDK_VERSIONS = ['26.13.3-mbaku', '26.14.2-nala', '26.15.0-owl'];
 const SCRIPT_VERSION = '0.5.7';
 const TICKET_KEY = `ioridev.disneyplus4k.once.v${SCRIPT_VERSION}`;
 const OLD_MODES = [
@@ -241,6 +241,64 @@ assert.deepEqual(fromRealmJson(planRealm, `(() => {
     assert.equal(planned.sourceUnchanged, true, `${mode}: preflight override is copy-on-write`);
     assert.equal(planned.preflight, SINGLE_VARIANT_MODES.includes(mode) ? false : 'absent',
       `${mode}: only single-variant modes disable the SDK 26.13 DRM preflight`);
+  }
+}
+
+{
+  // Normal fullhd unblocks HEVC_SDR (countering PCS hive-dmp Edge blockVideoFormats)
+  // while keeping all five HDR HEVC formats explicitly blocked, copy-on-write,
+  // and fail-closed on invalid or accessor blockVideoFormats.
+  const expectedHdrBlocked = [
+    'HEVC_HDR10',
+    'HEVC_HDR10_PLUS',
+    'HEVC_DOLBY_VISION_5',
+    'HEVC_DOLBY_VISION_8',
+    'HEVC_DOLBY_VISION_20',
+  ];
+  const fromEmpty = fromRealmJson(planRealm, `(() => {
+    const result = __DP4K_INTERNALS__.planPlaybackSessionOptions({}, 'fullhd');
+    return {
+      changed: result.changed,
+      blockList: result.options.clientParameters.configOverrides['hive-dmp'].session.vod.playlistFiltering.blockVideoFormats,
+    };
+  })()`);
+  assert.deepEqual(fromEmpty, {changed: true, blockList: expectedHdrBlocked},
+    'fullhd unblocks HEVC_SDR while keeping all HDR formats blocked when blockVideoFormats is absent');
+
+  const fromCaller = fromRealmJson(planRealm, `(() => {
+    const options = makeSdkOptions();
+    options.clientParameters.configOverrides['hive-dmp'].session.vod.playlistFiltering.blockVideoFormats.push('AV1_SDR');
+    const before = JSON.stringify(options);
+    const result = __DP4K_INTERNALS__.planPlaybackSessionOptions(options, 'fullhd');
+    const original = options.clientParameters.configOverrides['hive-dmp'].session.vod.playlistFiltering.blockVideoFormats;
+    const next = result.options.clientParameters.configOverrides['hive-dmp'].session.vod.playlistFiltering.blockVideoFormats;
+    return {
+      changed: result.changed,
+      sourceUnchanged: JSON.stringify(options) === before,
+      arrayCopied: next !== original,
+      blockList: next,
+    };
+  })()`);
+  assert.equal(fromCaller.changed, true);
+  assert.equal(fromCaller.sourceUnchanged, true, 'fullhd blockVideoFormats override is copy-on-write');
+  assert.equal(fromCaller.arrayCopied, true, 'fullhd allocates a fresh blockVideoFormats array');
+  assert.equal(fromCaller.blockList.includes('HEVC_SDR'), false, 'fullhd removes HEVC_SDR from blockVideoFormats');
+  assert.equal(fromCaller.blockList.includes('AV1_SDR'), true, 'fullhd preserves non-HEVC_SDR caller blocks');
+  for (const hdr of expectedHdrBlocked) {
+    assert.equal(fromCaller.blockList.includes(hdr), true, `fullhd keeps ${hdr} blocked`);
+  }
+
+  for (const [label, expr] of [
+    ['non-array blockVideoFormats', '(() => { const o = makeSdkOptions(); o.clientParameters.configOverrides["hive-dmp"].session.vod.playlistFiltering.blockVideoFormats = "HEVC_SDR"; return o; })()'],
+    ['non-string entry in blockVideoFormats', '(() => { const o = makeSdkOptions(); o.clientParameters.configOverrides["hive-dmp"].session.vod.playlistFiltering.blockVideoFormats = [123]; return o; })()'],
+    ['accessor entry in blockVideoFormats', '(() => { const o = makeSdkOptions(); const a = ["HEVC_HDR10"]; Object.defineProperty(a, "0", {get() { throw new Error("must not invoke"); }, enumerable: true, configurable: true}); o.clientParameters.configOverrides["hive-dmp"].session.vod.playlistFiltering.blockVideoFormats = a; return o; })()'],
+  ]) {
+    const rejected = fromRealmJson(planRealm, `(() => {
+      const options = ${expr};
+      const result = __DP4K_INTERNALS__.planPlaybackSessionOptions(options, 'fullhd');
+      return {changed: result.changed, sameObject: result.options === options};
+    })()`);
+    assert.deepEqual(rejected, {changed: false, sameObject: true}, `fullhd fails closed on ${label}`);
   }
 }
 

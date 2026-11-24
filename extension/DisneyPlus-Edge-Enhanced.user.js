@@ -62,7 +62,14 @@
   // Service SDKs whose createPlaybackSession and clientParameters.configOverrides
   // ["hive-dmp"] merge were statically re-checked for the 1080p override path.
   // The UHD session constructor hook stays pinned to SUPPORTED_PLAYBACK_SDK.
-  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku", "26.14.2-nala"]);
+  const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku", "26.14.2-nala", "26.15.0-owl"]);
+  const FULLHD_SDR_BLOCKED_VIDEO_FORMATS = Object.freeze([
+    "HEVC_HDR10",
+    "HEVC_HDR10_PLUS",
+    "HEVC_DOLBY_VISION_5",
+    "HEVC_DOLBY_VISION_8",
+    "HEVC_DOLBY_VISION_20",
+  ]);
   const MUTABLE_SCENARIOS = new Set([
     "ctr-regular",
     "ctr-high",
@@ -72,7 +79,7 @@
 
   // SINGLE_VARIANT_MODULES_START
   // Generated from src/hls-single-variant.mjs and src/single-variant-network.mjs.
-  const { selectSingleFhdVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter } = (() => {
+  const { selectSingleFhdVariant, selectSingleFhdSdrVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter } = (() => {
 /*
  * Pure, bounded HLS Master Playlist selectors for fixed FHD (1920x1080) and
  * UHD (3840x2160) targets.  The public wrappers do not accept caller-supplied
@@ -95,6 +102,8 @@ const FHD_WIDTH = 1920;
 const FHD_HEIGHT = 1080;
 const UHD_WIDTH = 3840;
 const UHD_HEIGHT = 2160;
+const HEVC_CODEC_PATTERN = /^(?:hvc1|hev1)(?:\.[A-Za-z0-9]+)*$/u;
+const AVC_CODEC_PATTERN = /^avc1(?:\.[A-Za-z0-9]+)*$/u;
 
 const MEDIA_TAG_PREFIXES = Object.freeze([
   "#EXTINF",
@@ -333,7 +342,7 @@ function isMediaTag(line) {
   return false;
 }
 
-function isCandidate(variant, targetWidth, targetHeight, requiredVideoRange) {
+function isCandidate(variant, targetWidth, targetHeight, requiredVideoRange, videoCodecPattern = HEVC_CODEC_PATTERN) {
   const attrs = variant.attrs;
   const resolution = attrs.RESOLUTION;
   const range = attrs["VIDEO-RANGE"];
@@ -359,9 +368,9 @@ function isCandidate(variant, targetWidth, targetHeight, requiredVideoRange) {
   if (codecList.length !== 2 || codecList.some((codec) => codec.length === 0)) {
     return false;
   }
-  const hasHevc = codecList.some((codec) => /^(?:hvc1|hev1)(?:\.[A-Za-z0-9]+)*$/u.test(codec));
+  const hasVideoCodec = codecList.some((codec) => videoCodecPattern.test(codec));
   const hasAac = codecList.some((codec) => codec === "mp4a.40.2");
-  if (!hasHevc || !hasAac) {
+  if (!hasVideoCodec || !hasAac) {
     return false;
   }
   if (!frameRate || frameRate.quoted || !/^(?:0|[0-9]+)(?:\.[0-9]+)?$/u.test(frameRate.value)) {
@@ -443,7 +452,7 @@ function sameLineRecords(left, right) {
   return true;
 }
 
-function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRange) {
+function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRange, allowAvcFallback = false) {
   if (typeof input !== "string") {
     return makeResult(input, "invalid-input");
   }
@@ -589,7 +598,10 @@ function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRang
       return makeResult(input, "missing-group", variants.length);
     }
 
-    const candidates = variants.filter((variant) => isCandidate(variant, targetWidth, targetHeight, requiredVideoRange));
+    const hevcCandidates = variants.filter((variant) => isCandidate(variant, targetWidth, targetHeight, requiredVideoRange, HEVC_CODEC_PATTERN));
+    const candidates = hevcCandidates.length > 0 || !allowAvcFallback
+      ? hevcCandidates
+      : variants.filter((variant) => isCandidate(variant, targetWidth, targetHeight, requiredVideoRange, AVC_CODEC_PATTERN));
     if (candidates.length === 0) {
       return makeResult(input, "no-compatible-candidate", variants.length, 0);
     }
@@ -630,7 +642,7 @@ function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRang
     if (!sameLineRecords(retainedRecords, reparsedRecords)) {
       return makeResult(input, "output-invariant-failed", variants.length, candidates.length);
     }
-    const reparsed = selectSingleVariant(output, targetWidth, targetHeight, requiredVideoRange);
+    const reparsed = selectSingleVariant(output, targetWidth, targetHeight, requiredVideoRange, allowAvcFallback);
     if (
       reparsed.reason !== "already-single-compatible" ||
       reparsed.variantCount !== 1 ||
@@ -653,6 +665,10 @@ function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRang
 
 function selectSingleFhdVariant(input) {
   return selectSingleVariant(input, FHD_WIDTH, FHD_HEIGHT, "SDR");
+}
+
+function selectSingleFhdSdrVariant(input) {
+  return selectSingleVariant(input, FHD_WIDTH, FHD_HEIGHT, "SDR", true);
 }
 
 function selectSingleUhdVariant(input) {
@@ -1426,7 +1442,7 @@ function createSingleVariantNetworkAdapter({
   });
 }
 
-    return { selectSingleFhdVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter };
+    return { selectSingleFhdVariant, selectSingleFhdSdrVariant, selectSingleUhdVariant, selectSingleHdrUhdVariant, summarizeUhdVariantRanges, createSingleVariantNetworkAdapter };
   })();
   // SINGLE_VARIANT_MODULES_END
 
@@ -1744,6 +1760,38 @@ function createSingleVariantNetworkAdapter({
       if (filtering.minHeight !== undefined
         && (!Number.isFinite(filtering.minHeight) || filtering.minHeight > plan.sdkMaxHeight)) return unchanged;
       filtering.maxHeight = plan.sdkMaxHeight;
+      if (plan.continuousFhd) {
+        // Server config (PCS hive-dmp, Nov 2026) adds "HEVC_SDR" to Edge's
+        // blockVideoFormats, causing playback-session to omit h.265 from the
+        // playback request even when HEVC Video Extensions are installed.
+        // Unblock only HEVC_SDR here while keeping all HDR formats blocked.
+        const blocked = [];
+        if (filtering.blockVideoFormats !== undefined) {
+          const existing = filtering.blockVideoFormats;
+          if (!Array.isArray(existing) || Object.getPrototypeOf(existing) !== Array.prototype) {
+            throw new TypeError("Invalid SDK blockVideoFormats");
+          }
+          const descriptors = Object.getOwnPropertyDescriptors(existing);
+          const length = descriptors.length?.value;
+          if (!Number.isInteger(length) || length < 0 || length > 32
+            || Reflect.ownKeys(descriptors).length !== length + 1) {
+            throw new TypeError("Invalid SDK blockVideoFormats");
+          }
+          for (let index = 0; index < length; index += 1) {
+            const entry = descriptors[String(index)];
+            if (!entry || !Object.prototype.hasOwnProperty.call(entry, "value") || typeof entry.value !== "string") {
+              throw new TypeError("Invalid SDK blockVideoFormats entry");
+            }
+            if (entry.value !== "HEVC_SDR" && !blocked.includes(entry.value)) {
+              blocked.push(entry.value);
+            }
+          }
+        }
+        for (const hdrFormat of FULLHD_SDR_BLOCKED_VIDEO_FORMATS) {
+          if (!blocked.includes(hdrFormat)) blocked.push(hdrFormat);
+        }
+        filtering.blockVideoFormats = blocked;
+      }
       resolution.max = [plan.resolution];
       attributes.resolution = resolution;
       vod.playlistFiltering = filtering;
@@ -2655,7 +2703,8 @@ function createSingleVariantNetworkAdapter({
           }
           const plan = getModePlan(state.mode);
           const selected = plan.singleHdrVariant ? selectSingleHdrUhdVariant(text)
-            : plan.singleSdrProbe ? selectSingleUhdVariant(text) : selectSingleFhdVariant(text);
+            : plan.singleSdrProbe ? selectSingleUhdVariant(text)
+              : plan.continuousFhd ? selectSingleFhdSdrVariant(text) : selectSingleFhdVariant(text);
           if (plan.singleSdrProbe) {
             // Read only bounded numeric/enum diagnostics from the original
             // master. Never pass a master/media playlist onward in probe mode,
@@ -2694,7 +2743,8 @@ function createSingleVariantNetworkAdapter({
           }
           state.singleVariantMasters++;
           state.singleVariantAccepted = true;
-          const target = getModePlan(state.mode).singleHdrVariant ? "3840x2160 PQ HEVC/AAC" : "1920x1080 SDR HEVC/AAC";
+          const target = getModePlan(state.mode).singleHdrVariant ? "3840x2160 PQ HEVC/AAC"
+            : getModePlan(state.mode).continuousFhd ? "1920x1080 SDR" : "1920x1080 SDR HEVC/AAC";
           state.singleVariantStatus = `${kind}/${channel}: ${state.singleVariantSourceCount} → 1（候補${state.singleVariantCandidateCount}・${target}）`;
           recordEvent("HLS単一候補確認", state.singleVariantStatus);
         },
@@ -2902,6 +2952,8 @@ function createSingleVariantNetworkAdapter({
   function installPlaybackSdkOverride() {
     if (!getModePlan(state.mode).sdkMaxHeight && !getModePlan(state.mode).sdkInspectOnly) return;
     const globalName = "playback-service";
+    const keepWatching = !getModePlan(state.mode).sdkUhdPolicy;
+    const patchedPrototypes = new WeakSet();
     const patchExport = (exported) => {
       try {
         const Service = exported?.PlaybackService;
@@ -2909,11 +2961,13 @@ function createSingleVariantNetworkAdapter({
           ? Service.version === SUPPORTED_PLAYBACK_SDK
           : FHD_PLAYBACK_SDKS.has(Service.version));
         if (!supported) {
+          state.sdkConfigReady = false;
           state.sdkConfigStatus = "対応SDKを確認できず、内部上限は未変更";
           renderOverlay();
           return;
         }
         const prototype = Service.prototype;
+        if (patchedPrototypes.has(prototype)) return;
         const descriptor = Object.getOwnPropertyDescriptor(prototype, "createPlaybackSession");
         if (!descriptor || typeof descriptor.value !== "function" || !descriptor.configurable) return;
         const nativeCreate = descriptor.value;
@@ -2993,31 +3047,49 @@ function createSingleVariantNetworkAdapter({
             }
           },
         });
-        state.sdkConfigStatus = "対応SDKのセッション作成を監視中（まだ設定未適用）";
+        patchedPrototypes.add(prototype);
+        if (!state.sdkConfigReady) {
+          state.sdkConfigStatus = "対応SDKのセッション作成を監視中（まだ設定未適用）";
+        }
         renderOverlay();
       } catch (_) {
         state.sdkConfigStatus = "SDKフックを設定できず、内部上限は未変更";
         renderOverlay();
       }
     };
-    const existing = Object.getOwnPropertyDescriptor(globalThis, globalName);
-    if (existing) {
-      // Do not replace someone else's getter/setter or non-writable global.
-      if (Object.prototype.hasOwnProperty.call(existing, "value")) patchExport(existing.value);
-      return;
-    }
-    try {
-      // UMD publishes this export synchronously. Restore a normal data property
-      // immediately, before the app can use it; no polling or permanent setter.
+    const watchGlobal = (initialValue) => {
+      let currentValue = initialValue;
+      // UMD publishes this export synchronously. In 1080p/FHD modes, Disney+'s
+      // web player may re-inject playback-service.js via PlaybackServiceLoader
+      // (removing the previous script tag and re-evaluating UMD), so keep
+      // watching subsequent assignments and patch each new PlaybackService.
+      // UHD modes keep the original one-shot publication behavior unchanged.
       Object.defineProperty(globalThis, globalName, {
         configurable: true,
         enumerable: true,
-        get: () => undefined,
+        get: () => currentValue,
         set: (value) => {
-          Object.defineProperty(globalThis, globalName, { value, configurable: true, enumerable: true, writable: true });
+          currentValue = value;
+          if (!keepWatching) {
+            Object.defineProperty(globalThis, globalName, { value, configurable: true, enumerable: true, writable: true });
+          }
           patchExport(value);
         },
       });
+    };
+    const existing = Object.getOwnPropertyDescriptor(globalThis, globalName);
+    if (existing) {
+      // Do not replace someone else's getter/setter or non-writable global.
+      if (Object.prototype.hasOwnProperty.call(existing, "value")) {
+        patchExport(existing.value);
+        if (keepWatching && existing.configurable && existing.writable) {
+          try { watchGlobal(existing.value); } catch (_) { /* Keep current patched export. */ }
+        }
+      }
+      return;
+    }
+    try {
+      watchGlobal(undefined);
     } catch (_) { state.sdkConfigStatus = "SDK公開先を監視できず、内部上限は未変更"; }
   }
 
