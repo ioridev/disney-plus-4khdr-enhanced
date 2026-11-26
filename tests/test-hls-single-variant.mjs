@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { selectSingleFhdVariant, selectSingleHdrUhdVariant, selectSingleUhdVariant, summarizeUhdVariantRanges } from "../src/hls-single-variant.mjs";
+import { selectSingleFhdSdrVariant, selectSingleFhdVariant, selectSingleHdrUhdVariant, selectSingleUhdVariant, summarizeUhdVariantRanges } from "../src/hls-single-variant.mjs";
 
 const REASONS = new Set([
   "already-single-compatible",
@@ -629,6 +629,111 @@ const badUri = "bad.m3u8?auth=bad-secret";
   for (const invalid of [null, new Proxy({}, {get(){throw new Error("do not inspect");}}), "#EXTM3U\n#EXTINF:1,\nsecret.m4s", `${input}\n#EXTINF:1,`]) {
     assert.deepEqual(summarizeUhdVariantRanges(invalid), {status:"invalid-or-non-master",total:0,sdr:0,pq:0,hlg:0,unspecified:0,unknown:0});
   }
+}
+
+// selectSingleFhdSdrVariant prefers 1920x1080 SDR HEVC+AAC when present, and
+// falls back to 1920x1080 SDR AVC+AAC only when zero HEVC candidates exist.
+// HDR ranges (PQ/HLG/absent) and non-1080p variants remain strictly rejected,
+// and selectSingleFhdVariant stays HEVC-only.
+{
+  // HEVC preferred even when AVC has higher BANDWIDTH.
+  const mixedCodec = [
+    "#EXTM3U",
+    ...mediaLines,
+    sessionKey,
+    iframe,
+    stream(6000000, "hvc1.2.4.L120.90,mp4a.40.2", ',AUDIO="aud",SUBTITLES="sub",CLOSED-CAPTIONS="cc"'),
+    "hevc-fhd.m3u8",
+    stream(12899676, "avc1.640028,mp4a.40.2", ',AUDIO="aud",SUBTITLES="sub",CLOSED-CAPTIONS="cc"'),
+    "avc-fhd.m3u8",
+  ].join("\n");
+  const preferred = selectSingleFhdSdrVariant(mixedCodec);
+  expectShape(preferred);
+  assert.equal(preferred.changed, true);
+  assert.equal(preferred.reason, "selected-compatible-variant");
+  assert.equal(preferred.variantCount, 2);
+  assert.equal(preferred.candidateCount, 1);
+  assert.equal(preferred.width, 1920);
+  assert.equal(preferred.height, 1080);
+  assert.ok(preferred.text.includes("hevc-fhd.m3u8"));
+  assert.ok(!preferred.text.includes("avc-fhd.m3u8"));
+
+  // AVC-only 1080p SDR master (matching real Disney+ AVC+AAC / AVC+EC-3 layout):
+  // selects unique max-bandwidth 1920x1080 SDR avc1+mp4a.40.2 variant while
+  // selectSingleFhdVariant still rejects it.
+  const avcOnlyMaster = [
+    "#EXTM3U",
+    "#EXT-X-INDEPENDENT-SEGMENTS",
+    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="eac-3",NAME="English",LANGUAGE="en",AUTOSELECT=YES,CHANNELS="6",URI="audio-ec3.m3u8"',
+    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac-128k",NAME="English",LANGUAGE="en",AUTOSELECT=YES,CHANNELS="2",URI="audio-aac.m3u8"',
+    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="sub-main",NAME="English",LANGUAGE="en",URI="sub.m3u8"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=6684443,CODECS="avc1.64001f,mp4a.40.2",RESOLUTION=1280x720,FRAME-RATE=23.976,VIDEO-RANGE=SDR,AUDIO="aac-128k",SUBTITLES="sub-main"',
+    "hd-720.m3u8",
+    '#EXT-X-STREAM-INF:BANDWIDTH=8704115,CODECS="avc1.640028,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=23.976,VIDEO-RANGE=SDR,AUDIO="aac-128k",SUBTITLES="sub-main"',
+    "fhd-avc-low.m3u8",
+    '#EXT-X-STREAM-INF:BANDWIDTH=12899676,CODECS="avc1.640028,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=23.976,VIDEO-RANGE=SDR,AUDIO="aac-128k",SUBTITLES="sub-main"',
+    "fhd-avc-high.m3u8",
+    '#EXT-X-STREAM-INF:BANDWIDTH=13028416,CODECS="avc1.640028,ec-3",RESOLUTION=1920x1080,FRAME-RATE=23.976,VIDEO-RANGE=SDR,AUDIO="eac-3",SUBTITLES="sub-main"',
+    "fhd-avc-ec3.m3u8",
+    sessionKey,
+    iframe,
+  ].join("\n");
+  const fallback = selectSingleFhdSdrVariant(avcOnlyMaster);
+  expectShape(fallback);
+  assert.equal(fallback.changed, true);
+  assert.equal(fallback.reason, "selected-compatible-variant");
+  assert.equal(fallback.variantCount, 4);
+  assert.equal(fallback.candidateCount, 2);
+  assert.equal(fallback.width, 1920);
+  assert.equal(fallback.height, 1080);
+  assert.equal(countNormalVariants(fallback.text), 1);
+  assert.ok(fallback.text.includes("fhd-avc-high.m3u8"));
+  assert.ok(!fallback.text.includes("fhd-avc-low.m3u8"));
+  assert.ok(!fallback.text.includes("fhd-avc-ec3.m3u8"));
+  assert.ok(!fallback.text.includes("hd-720.m3u8"));
+  assert.ok(fallback.text.includes(sessionKey));
+  assert.ok(fallback.text.includes(iframe));
+
+  const reparsedFallback = selectSingleFhdSdrVariant(fallback.text);
+  expectShape(reparsedFallback);
+  assert.equal(reparsedFallback.reason, "already-single-compatible");
+  assert.equal(reparsedFallback.changed, false);
+  assert.equal(reparsedFallback.variantCount, 1);
+  assert.equal(reparsedFallback.candidateCount, 1);
+  assert.equal(reparsedFallback.text, fallback.text);
+
+  const strictHevc = selectSingleFhdVariant(avcOnlyMaster);
+  assert.equal(strictHevc.reason, "no-compatible-candidate", "selectSingleFhdVariant remains strictly HEVC-only");
+
+  // AVC HDR/unspecified range or 720p-only remain strictly rejected.
+  const rejectedAvcRanges = [
+    "#EXTM3U",
+    stream(9000000, "avc1.640028,mp4a.40.2").replace("VIDEO-RANGE=SDR", "VIDEO-RANGE=PQ"),
+    "avc-pq.m3u8",
+    stream(9100000, "avc1.640028,mp4a.40.2").replace("VIDEO-RANGE=SDR", "VIDEO-RANGE=HLG"),
+    "avc-hlg.m3u8",
+    stream(9200000, "avc1.640028,mp4a.40.2").replace(",VIDEO-RANGE=SDR", ""),
+    "avc-no-range.m3u8",
+    streamFor(1280, 720, 6000000, "avc1.64001f,mp4a.40.2"),
+    "avc-720.m3u8",
+    streamFor(3840, 2160, 15000000, "avc1.640033,mp4a.40.2"),
+    "avc-4k.m3u8",
+  ].join("\n");
+  const rejectedResult = selectSingleFhdSdrVariant(rejectedAvcRanges);
+  expectShape(rejectedResult);
+  assert.equal(rejectedResult.reason, "no-compatible-candidate");
+  assert.equal(rejectedResult.changed, false);
+  assert.equal(rejectedResult.candidateCount, 0);
+
+  // Ambiguous equal max-bandwidth AVC candidates fail closed.
+  const tiedAvc = [
+    "#EXTM3U",
+    stream(12000000, "avc1.640028,mp4a.40.2"),
+    "avc-a.m3u8",
+    stream(12000000, "avc1.640028,mp4a.40.2"),
+    "avc-b.m3u8",
+  ].join("\n");
+  assert.equal(selectSingleFhdSdrVariant(tiedAvc).reason, "ambiguous-candidate");
 }
 
 console.log("test-hls-single-variant: ok");

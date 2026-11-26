@@ -1418,18 +1418,116 @@ await runNormalMode();
     'late errors from a retired page cannot disarm the next page');
 }
 
-// SDKs 26.13.3 and 26.14.2 are accepted for the 1080p service override only; the
+// SDKs 26.13.3, 26.14.2, 26.15.0, 26.16.0 and 26.16.1 are accepted for the 1080p service override only; the
 // flow is the same mocked sequence as 26.10.0, not a real CDM playback result.
-for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala']) {
+for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala', '26.15.0-owl', '26.16.0-piglet', '26.16.1-piglet']) {
   const runtime = createRuntime({mode: 'fullhd', sdkVersion});
   const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
   await publishAndCreate(runtime);
+  const blockList = runtime.sdkCalls[0].args[0].clientParameters.configOverrides['hive-dmp'].session.vod.playlistFiltering.blockVideoFormats;
+  assert.equal(Array.isArray(blockList) && !blockList.includes('HEVC_SDR'), true,
+    `${sdkVersion}: fullhd unblocks HEVC_SDR in blockVideoFormats`);
+  for (const hdr of ['HEVC_HDR10', 'HEVC_HDR10_PLUS', 'HEVC_DOLBY_VISION_5', 'HEVC_DOLBY_VISION_8', 'HEVC_DOLBY_VISION_20']) {
+    assert.equal(blockList.includes(hdr), true, `${sdkVersion}: fullhd keeps ${hdr} blocked`);
+  }
   await sendPlayback(runtime);
   await fetchMasterAndMedia(runtime);
   await prepareSession(runtime);
   assert.equal(control.getState().failed, false, `full-HD runs on the re-checked ${sdkVersion} service SDK`);
   assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.mode.v1'), 'fullhd',
     `the ${sdkVersion} service SDK does not disarm full-HD`);
+}
+// Normal fullhd falls back to 1920x1080 SDR AVC+AAC when a master contains no
+// HEVC variants (e.g. PC without HEVC Video Extensions or AVC-only title), while
+// still failing closed on HDR-only or 720p-only masters.
+{
+  const avcFhdMaster = [
+    '#EXTM3U',
+    '#EXT-X-STREAM-INF:BANDWIDTH=6684443,CODECS="avc1.64001f,mp4a.40.2",RESOLUTION=1280x720,VIDEO-RANGE=SDR,FRAME-RATE=23.976',
+    'video-720-avc.m3u8',
+    '#EXT-X-STREAM-INF:BANDWIDTH=8704115,CODECS="avc1.640028,mp4a.40.2",RESOLUTION=1920x1080,VIDEO-RANGE=SDR,FRAME-RATE=23.976',
+    'video-1080-avc-low.m3u8',
+    '#EXT-X-STREAM-INF:BANDWIDTH=12899676,CODECS="avc1.640028,mp4a.40.2",RESOLUTION=1920x1080,VIDEO-RANGE=SDR,FRAME-RATE=23.976',
+    'video-1080-avc-high.m3u8',
+    '',
+  ].join('\n');
+  const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.15.0-owl', master: avcFhdMaster});
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  await publishAndCreate(runtime);
+  await sendPlayback(runtime);
+  const masterResponse = await runtime.run(`fetch(${JSON.stringify(MASTER_URL)})`);
+  const filteredText = await masterResponse.text();
+  assert.equal(countVariants(filteredText), 1, 'fullhd selects the single highest-bitrate 1080p SDR AVC fallback');
+  assert.equal(filteredText.includes('video-1080-avc-high.m3u8'), true);
+  assert.equal(filteredText.includes('video-1080-avc-low.m3u8'), false);
+  assert.equal(filteredText.includes('video-720-avc.m3u8'), false);
+  await prepareSession(runtime);
+  assert.equal(control.getState().failed, false, 'fullhd succeeds on AVC-only 1080p SDR master');
+
+  const hdOnlyMaster = [
+    '#EXTM3U',
+    '#EXT-X-STREAM-INF:BANDWIDTH=6684443,CODECS="avc1.64001f,mp4a.40.2",RESOLUTION=1280x720,VIDEO-RANGE=SDR,FRAME-RATE=23.976',
+    'video-720-avc.m3u8',
+    '',
+  ].join('\n');
+  const runtimeHdOnly = createRuntime({mode: 'fullhd', sdkVersion: '26.15.0-owl', master: hdOnlyMaster});
+  await publishAndCreate(runtimeHdOnly);
+  await sendPlayback(runtimeHdOnly);
+  await assert.rejects(
+    runtimeHdOnly.run(`fetch(${JSON.stringify(MASTER_URL)})`),
+    (error) => error.name === 'AbortError',
+    'fullhd still rejects 720p-only AVC master');
+  assert.equal(runtimeHdOnly.context.__DisneyPlusEdgeEnhancedToolbar.getState().failed, true);
+}
+// Disney+'s PlaybackServiceLoader may remove and re-inject playback-service.js
+// during player bootstrap, republishing a fresh PlaybackService class.
+{
+  const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.15.0-owl'});
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  runtime.publishSdk();
+  // Simulate PlaybackService constructor's debugOverlayManager self-reassignment.
+  runtime.run("globalThis['playback-service'] = globalThis['playback-service'] || {};");
+  // Simulate a second UMD evaluation publishing a brand-new PlaybackService class.
+  runtime.run(`globalThis['playback-service'] = {
+    PlaybackService: class RepublishedPlaybackService {
+      static get version() { return '26.15.0-owl'; }
+      createPlaybackSession(...args) { return PlaybackService.prototype.createPlaybackSession.apply(this, args); }
+    },
+  };`);
+  runtime.run(`globalThis.sdkInput = ${JSON.stringify(makeSdkOptions())}; globalThis.sdkMarker = {marker: "sdk"};`);
+  // Republished PlaybackService must be patched (without double-wrapping).
+  const createFn = runtime.run("globalThis['playback-service'].PlaybackService.prototype.createPlaybackSession");
+  assert.equal(String(createFn).includes('beginSingleVariantSdk'), true,
+    'a republished supported service SDK is patched on the second global assignment');
+  // Replace createPlaybackSession on a fresh class directly hooked to sdkCalls for end-to-end check.
+  const runtime2 = createRuntime({mode: 'fullhd', sdkVersion: '26.15.0-owl'});
+  runtime2.publishSdk();
+  runtime2.context.recordSecondCall = (thisValue, args) => {
+    runtime2.sdkCalls.push({thisValue, args});
+    return runtime2.sdkPromise;
+  };
+  runtime2.run(`globalThis['playback-service'] = {
+    PlaybackService: class SecondPlaybackService {
+      static get version() { return '26.15.0-owl'; }
+      createPlaybackSession(...args) { return recordSecondCall(this, args); }
+    },
+  };`);
+  runtime2.run(`globalThis.sdkInput = ${JSON.stringify(makeSdkOptions())}; globalThis.sdkMarker = {marker: "sdk"};`);
+  await createSdk(runtime2);
+  await sendPlayback(runtime2);
+  await fetchMasterAndMedia(runtime2);
+  await prepareSession(runtime2);
+  assert.equal(runtime2.context.__DisneyPlusEdgeEnhancedToolbar.getState().failed, false,
+    'full-HD completes after a second playback-service.js UMD publication');
+  // Republishing an unverified SDK version revokes readiness and fails closed.
+  runtime2.run(`globalThis['playback-service'] = {
+    PlaybackService: class UnknownSecondService {
+      static get version() { return '26.99.0-unknown'; }
+      createPlaybackSession(...args) { return recordSecondCall(this, args); }
+    },
+  };`);
+  await rejectPlaybackFetch(runtime2, 'republished unverified SDK revokes playback POST readiness');
+  assert.equal(control.getState().failed, false);
 }
 // Disney+ may wrap window.Request in a forwarding Proxy after document start.
 {

@@ -20,6 +20,8 @@ const FHD_WIDTH = 1920;
 const FHD_HEIGHT = 1080;
 const UHD_WIDTH = 3840;
 const UHD_HEIGHT = 2160;
+const HEVC_CODEC_PATTERN = /^(?:hvc1|hev1)(?:\.[A-Za-z0-9]+)*$/u;
+const AVC_CODEC_PATTERN = /^avc1(?:\.[A-Za-z0-9]+)*$/u;
 
 const MEDIA_TAG_PREFIXES = Object.freeze([
   "#EXTINF",
@@ -258,7 +260,7 @@ function isMediaTag(line) {
   return false;
 }
 
-function isCandidate(variant, targetWidth, targetHeight, requiredVideoRange) {
+function isCandidate(variant, targetWidth, targetHeight, requiredVideoRange, videoCodecPattern = HEVC_CODEC_PATTERN) {
   const attrs = variant.attrs;
   const resolution = attrs.RESOLUTION;
   const range = attrs["VIDEO-RANGE"];
@@ -284,9 +286,9 @@ function isCandidate(variant, targetWidth, targetHeight, requiredVideoRange) {
   if (codecList.length !== 2 || codecList.some((codec) => codec.length === 0)) {
     return false;
   }
-  const hasHevc = codecList.some((codec) => /^(?:hvc1|hev1)(?:\.[A-Za-z0-9]+)*$/u.test(codec));
+  const hasVideoCodec = codecList.some((codec) => videoCodecPattern.test(codec));
   const hasAac = codecList.some((codec) => codec === "mp4a.40.2");
-  if (!hasHevc || !hasAac) {
+  if (!hasVideoCodec || !hasAac) {
     return false;
   }
   if (!frameRate || frameRate.quoted || !/^(?:0|[0-9]+)(?:\.[0-9]+)?$/u.test(frameRate.value)) {
@@ -368,7 +370,7 @@ function sameLineRecords(left, right) {
   return true;
 }
 
-function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRange) {
+function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRange, allowAvcFallback = false) {
   if (typeof input !== "string") {
     return makeResult(input, "invalid-input");
   }
@@ -514,7 +516,10 @@ function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRang
       return makeResult(input, "missing-group", variants.length);
     }
 
-    const candidates = variants.filter((variant) => isCandidate(variant, targetWidth, targetHeight, requiredVideoRange));
+    const hevcCandidates = variants.filter((variant) => isCandidate(variant, targetWidth, targetHeight, requiredVideoRange, HEVC_CODEC_PATTERN));
+    const candidates = hevcCandidates.length > 0 || !allowAvcFallback
+      ? hevcCandidates
+      : variants.filter((variant) => isCandidate(variant, targetWidth, targetHeight, requiredVideoRange, AVC_CODEC_PATTERN));
     if (candidates.length === 0) {
       return makeResult(input, "no-compatible-candidate", variants.length, 0);
     }
@@ -555,7 +560,7 @@ function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRang
     if (!sameLineRecords(retainedRecords, reparsedRecords)) {
       return makeResult(input, "output-invariant-failed", variants.length, candidates.length);
     }
-    const reparsed = selectSingleVariant(output, targetWidth, targetHeight, requiredVideoRange);
+    const reparsed = selectSingleVariant(output, targetWidth, targetHeight, requiredVideoRange, allowAvcFallback);
     if (
       reparsed.reason !== "already-single-compatible" ||
       reparsed.variantCount !== 1 ||
@@ -578,6 +583,10 @@ function selectSingleVariant(input, targetWidth, targetHeight, requiredVideoRang
 
 export function selectSingleFhdVariant(input) {
   return selectSingleVariant(input, FHD_WIDTH, FHD_HEIGHT, "SDR");
+}
+
+export function selectSingleFhdSdrVariant(input) {
+  return selectSingleVariant(input, FHD_WIDTH, FHD_HEIGHT, "SDR", true);
 }
 
 export function selectSingleUhdVariant(input) {
