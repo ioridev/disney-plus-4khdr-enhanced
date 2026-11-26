@@ -581,10 +581,10 @@ assert.deepEqual(rejectedUhdMinHeight, {
   after: rejectedUhdMinHeight.before,
 }, 'UHD minHeight=2161 is rejected fail-closed without mutation');
 
-const createRuntime = ({preloadSdk = false, sdkVersion = SDK_VERSION, mode = SDK_MODE, emeMode = 'valid'} = {}) => {
+const createRuntime = ({preloadSdk = false, sdkVersion = SDK_VERSION, mode = SDK_MODE, emeMode = 'valid', storageEntries = []} = {}) => {
   const callbacks = new Map();
   let reloads = 0;
-  const localStorage = makeStorage([['ioridev.disneyplus4k.mode.v1', mode]]);
+  const localStorage = makeStorage([['ioridev.disneyplus4k.mode.v1', mode], ...storageEntries]);
   const sessionStorage = makeStorage([[
     TICKET_KEY,
     JSON.stringify({version: SCRIPT_VERSION, mode, documentUrl: DOCUMENT_URL, createdAt: Date.now() - 100}),
@@ -834,10 +834,10 @@ assert.equal(vm.runInContext('nativeFetchCalls.length', nativeCap.context), 1,
   'native-cap mode allows known playback POST after the SDK override is applied');
 const nativeCapMissingSdk = createRuntime({mode: NATIVE_CAP_MODE});
 await assertUnappliedTrafficIsBlocked(nativeCapMissingSdk);
-const nativeCapWrongVersion = createRuntime({preloadSdk: true, mode: NATIVE_CAP_MODE, sdkVersion: '26.10.0-other'});
-assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', nativeCapWrongVersion.context), true,
-  'native-cap mode does not patch an unsupported SDK version');
-await assertUnappliedTrafficIsBlocked(nativeCapWrongVersion);
+const nativeCapUnverifiedVersion = createRuntime({preloadSdk: true, mode: NATIVE_CAP_MODE, sdkVersion: '26.10.0-other'});
+assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession !== sdkNativeCreate', nativeCapUnverifiedVersion.context), true,
+  'native-cap mode optimistically patches an unverified SDK version');
+await assertUnappliedTrafficIsBlocked(nativeCapUnverifiedVersion);
 
 const sdkPlayReady = createRuntime({preloadSdk: true, mode: PLAYREADY_MODE});
 assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession !== sdkNativeCreate', sdkPlayReady.context), true,
@@ -873,10 +873,10 @@ assert.equal(vm.runInContext('nativeFetchCalls.length', sdkPlayReady.context), 1
   'SDK PlayReady mode allows known playback POST after the SDK override is applied');
 const sdkPlayReadyMissingSdk = createRuntime({mode: PLAYREADY_MODE});
 await assertUnappliedTrafficIsBlocked(sdkPlayReadyMissingSdk);
-const sdkPlayReadyWrongVersion = createRuntime({preloadSdk: true, mode: PLAYREADY_MODE, sdkVersion: '26.10.0-other'});
-assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', sdkPlayReadyWrongVersion.context), true,
-  'SDK PlayReady mode does not patch an unsupported SDK version');
-await assertUnappliedTrafficIsBlocked(sdkPlayReadyWrongVersion);
+const sdkPlayReadyUnverifiedVersion = createRuntime({preloadSdk: true, mode: PLAYREADY_MODE, sdkVersion: '26.10.0-other'});
+assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession !== sdkNativeCreate', sdkPlayReadyUnverifiedVersion.context), true,
+  'SDK PlayReady mode optimistically patches an unverified SDK version');
+await assertUnappliedTrafficIsBlocked(sdkPlayReadyUnverifiedVersion);
 
 const uhdPreApplication = createRuntime({preloadSdk: true, mode: UHD_PLAYREADY_MODE});
 await assertUhdPreApplicationIsBlocked(uhdPreApplication);
@@ -1215,10 +1215,23 @@ for (const mode of [PLAYREADY_MODE, UHD_PLAYREADY_MODE]) {
   await assertUnappliedTrafficIsBlocked(engineAccessorRuntime);
 }
 
-const wrongVersion = createRuntime({preloadSdk: true, sdkVersion: '26.10.0-other'});
-assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', wrongVersion.context), true,
-  'unsupported SDK version is not patched');
-await assertUnappliedTrafficIsBlocked(wrongVersion);
+const unverifiedVersion = createRuntime({preloadSdk: true, sdkVersion: '26.10.0-other'});
+assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession !== sdkNativeCreate', unverifiedVersion.context), true,
+  'an unverified SDK version is patched optimistically');
+await assertUnappliedTrafficIsBlocked(unverifiedVersion);
+
+const unverifiedFailure = createRuntime({preloadSdk: true, sdkVersion: '26.10.0-other'});
+const rejectedUnverifiedCreate = vm.runInContext(`sdkExpectedPromise = Promise.reject(new Error('async SDK failure')); sdkInstance.createPlaybackSession(makeRuntimeOptions());`, unverifiedFailure.context);
+await assert.rejects(rejectedUnverifiedCreate, /async SDK failure/);
+assert.deepEqual(JSON.parse(unverifiedFailure.localStorage.getItem('ioridev.disneyplus4k.fhd-sdk-denied.v1')), ['26.10.0-other'],
+  'a failed unverified SDK version is recorded in the persisted deny list');
+await assertUnappliedTrafficIsBlocked(unverifiedFailure);
+
+const deniedVersion = createRuntime({preloadSdk: true, sdkVersion: '26.10.0-other',
+  storageEntries: [['ioridev.disneyplus4k.fhd-sdk-denied.v1', JSON.stringify(['26.10.0-other'])]]});
+assert.equal(vm.runInContext('sdkInstance.constructor.prototype.createPlaybackSession === sdkNativeCreate', deniedVersion.context), true,
+  'a recorded SDK version is not patched again');
+await assertUnappliedTrafficIsBlocked(deniedVersion);
 
 for (const FHD_ONLY_SDK_VERSION of FHD_ONLY_SDK_VERSIONS) for (const mode of [SDK_MODE, NATIVE_CAP_MODE, PLAYREADY_MODE]) {
   const runtime = createRuntime({preloadSdk: true, mode, sdkVersion: FHD_ONLY_SDK_VERSION});
@@ -1269,6 +1282,8 @@ const rejectedCreate = vm.runInContext(`sdkExpectedPromise = Promise.reject(new 
 assert.equal(rejectedCreate, failedAsync.context.sdkExpectedPromise, 'rejected native Promise identity is preserved');
 await assert.rejects(rejectedCreate, /async SDK failure/);
 await assertUnappliedTrafficIsBlocked(failedAsync);
+assert.equal(failedAsync.localStorage.getItem('ioridev.disneyplus4k.fhd-sdk-denied.v1'), null,
+  'a verified SDK failure is not recorded in the deny list');
 
 const lateFailure = createRuntime({preloadSdk:true});
 const earlierCreate = vm.runInContext(`
