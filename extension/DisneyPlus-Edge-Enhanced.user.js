@@ -63,6 +63,18 @@
   // ["hive-dmp"] merge were statically re-checked for the 1080p override path.
   // The UHD session constructor hook stays pinned to SUPPORTED_PLAYBACK_SDK.
   const FHD_PLAYBACK_SDKS = new Set([SUPPORTED_PLAYBACK_SDK, "26.13.3-mbaku", "26.14.2-nala", "26.15.0-owl", "26.16.0-piglet", "26.16.1-piglet"]);
+  // FHD modes also try SDKs that have not been re-checked yet (optimistic
+  // application): the version string alone no longer gates the override, but
+  // the structural checks in installPlaybackSdkOverride (a patchable
+  // createPlaybackSession and recognized session options) still gate every
+  // application, and a version whose session creation fails after the
+  // override was applied — or whose options are not recognized — is recorded
+  // under FHD_SDK_DENIED_STORAGE_KEY and never tried again. Versions in
+  // FHD_SDK_DENYLIST are never tried; it is the manual escape hatch for SDKs
+  // known to misbehave despite passing the structural checks. The UHD paths
+  // stay pinned to SUPPORTED_PLAYBACK_SDK and never use this mechanism.
+  const FHD_SDK_DENYLIST = new Set([]);
+  const FHD_SDK_DENIED_STORAGE_KEY = "ioridev.disneyplus4k.fhd-sdk-denied.v1";
   const FULLHD_SDR_BLOCKED_VIDEO_FORMATS = Object.freeze([
     "HEVC_HDR10",
     "HEVC_HDR10_PLUS",
@@ -2949,6 +2961,25 @@ function createSingleVariantNetworkAdapter({
     }
   }
 
+  function loadFhdSdkDeniedVersions() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(FHD_SDK_DENIED_STORAGE_KEY) || "[]");
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(parsed.filter((value) => typeof value === "string" && value !== ""));
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function recordFhdSdkDeniedVersion(version) {
+    try {
+      const denied = loadFhdSdkDeniedVersions();
+      if (denied.has(version)) return;
+      denied.add(version);
+      localStorage.setItem(FHD_SDK_DENIED_STORAGE_KEY, JSON.stringify([...denied].slice(-16)));
+    } catch (_) { /* Storage is best-effort; this page still fails closed. */ }
+  }
+
   function installPlaybackSdkOverride() {
     if (!getModePlan(state.mode).sdkMaxHeight && !getModePlan(state.mode).sdkInspectOnly) return;
     const globalName = "playback-service";
@@ -2957,9 +2988,15 @@ function createSingleVariantNetworkAdapter({
     const patchExport = (exported) => {
       try {
         const Service = exported?.PlaybackService;
-        const supported = typeof Service === "function" && (getModePlan(state.mode).sdkUhdPolicy
-          ? Service.version === SUPPORTED_PLAYBACK_SDK
-          : FHD_PLAYBACK_SDKS.has(Service.version));
+        const uhdPolicy = getModePlan(state.mode).sdkUhdPolicy;
+        const version = typeof Service === "function" ? Service.version : undefined;
+        const denied = !uhdPolicy && typeof version === "string"
+          && (FHD_SDK_DENYLIST.has(version) || loadFhdSdkDeniedVersions().has(version));
+        const optimistic = !uhdPolicy && typeof version === "string" && version !== ""
+          && !FHD_PLAYBACK_SDKS.has(version) && !denied;
+        const supported = typeof Service === "function" && (uhdPolicy
+          ? version === SUPPORTED_PLAYBACK_SDK
+          : typeof version === "string" && version !== "" && !denied);
         if (!supported) {
           state.sdkConfigReady = false;
           state.sdkConfigStatus = "対応SDKを確認できず、内部上限は未変更";
@@ -2969,7 +3006,10 @@ function createSingleVariantNetworkAdapter({
         const prototype = Service.prototype;
         if (patchedPrototypes.has(prototype)) return;
         const descriptor = Object.getOwnPropertyDescriptor(prototype, "createPlaybackSession");
-        if (!descriptor || typeof descriptor.value !== "function" || !descriptor.configurable) return;
+        if (!descriptor || typeof descriptor.value !== "function" || !descriptor.configurable) {
+          if (optimistic) recordFhdSdkDeniedVersion(version);
+          return;
+        }
         const nativeCreate = descriptor.value;
         Object.defineProperty(prototype, "createPlaybackSession", {
           ...descriptor,
@@ -3009,6 +3049,7 @@ function createSingleVariantNetworkAdapter({
             }
             const planned = planPlaybackSessionOptions(args[0], state.mode);
             if (!planned.changed) {
+              if (optimistic) recordFhdSdkDeniedVersion(version);
               state.sdkConfigStatus = "引数を確認できず、内部上限は未変更";
               renderOverlay();
               if (singleVariantMode()) {
@@ -3026,9 +3067,13 @@ function createSingleVariantNetworkAdapter({
             if (plan.sdkRecommendationFlow) {
               state.sdkConfigStatus += " / SDK PlayReady recommendation flowを有効化（EME識別子は禁止）";
             }
+            if (optimistic) {
+              state.sdkConfigStatus += ` / 未検証SDK (${version}) の試行中`;
+            }
             recordEvent("SDK設定", `セッション単位のVOD上限を${plan.sdkMaxHeight}pへ設定`);
             const clearFailedAttempt = () => {
               if (state.sdkConfigAttempt !== attempt) return;
+              if (optimistic) recordFhdSdkDeniedVersion(version);
               state.sdkConfigReady = false;
               state.sdkConfigStatus = "設定上書き後のセッション作成に失敗（再生は未確認）";
               if (singleVariantMode()) stopSingleVariant("sdk-create-failed");
@@ -3049,7 +3094,9 @@ function createSingleVariantNetworkAdapter({
         });
         patchedPrototypes.add(prototype);
         if (!state.sdkConfigReady) {
-          state.sdkConfigStatus = "対応SDKのセッション作成を監視中（まだ設定未適用）";
+          state.sdkConfigStatus = optimistic
+            ? `未検証SDK (${version}) のセッション作成を試行中（まだ設定未適用）`
+            : "対応SDKのセッション作成を監視中（まだ設定未適用）";
         }
         renderOverlay();
       } catch (_) {

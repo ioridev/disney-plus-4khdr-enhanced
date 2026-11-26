@@ -1519,14 +1519,36 @@ for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala', '26.15.0-owl', '26.16
   await prepareSession(runtime2);
   assert.equal(runtime2.context.__DisneyPlusEdgeEnhancedToolbar.getState().failed, false,
     'full-HD completes after a second playback-service.js UMD publication');
-  // Republishing an unverified SDK version revokes readiness and fails closed.
+  // Republishing an unverified SDK version is tried optimistically: the new
+  // class is patched and readiness is kept.
   runtime2.run(`globalThis['playback-service'] = {
     PlaybackService: class UnknownSecondService {
       static get version() { return '26.99.0-unknown'; }
       createPlaybackSession(...args) { return recordSecondCall(this, args); }
     },
   };`);
-  await rejectPlaybackFetch(runtime2, 'republished unverified SDK revokes playback POST readiness');
+  const unknownCreateFn = runtime2.run("globalThis['playback-service'].PlaybackService.prototype.createPlaybackSession");
+  assert.equal(String(unknownCreateFn).includes('beginSingleVariantSdk'), true,
+    'a republished unverified service SDK is patched optimistically');
+  // A failed session creation on the unverified version records it in the
+  // persisted deny list.
+  runtime2.sdkPromise = Promise.reject(new Error('unverified SDK failure'));
+  await assert.rejects(
+    runtime2.run("new globalThis['playback-service'].PlaybackService().createPlaybackSession(sdkInput, sdkMarker)"),
+    /unverified SDK failure/);
+  assert.deepEqual(JSON.parse(runtime2.context.localStorage.getItem('ioridev.disneyplus4k.fhd-sdk-denied.v1')), ['26.99.0-unknown'],
+    'a failed unverified SDK version is recorded in the persisted deny list');
+  // Republishing a recorded version is not patched and revokes readiness.
+  runtime2.run(`globalThis['playback-service'] = {
+    PlaybackService: class DeniedSecondService {
+      static get version() { return '26.99.0-unknown'; }
+      createPlaybackSession(...args) { return recordSecondCall(this, args); }
+    },
+  };`);
+  const deniedCreateFn = runtime2.run("globalThis['playback-service'].PlaybackService.prototype.createPlaybackSession");
+  assert.equal(String(deniedCreateFn).includes('beginSingleVariantSdk'), false,
+    'a republished recorded SDK version is not patched');
+  await rejectPlaybackFetch(runtime2, 'republished denied SDK revokes playback POST readiness');
   assert.equal(control.getState().failed, false);
 }
 // Disney+ may wrap window.Request in a forwarding Proxy after document start.
@@ -1552,13 +1574,17 @@ for (const sdkVersion of ['26.13.3-mbaku', '26.14.2-nala', '26.15.0-owl', '26.16
 }
 {
   const runtime = createRuntime({mode: 'fullhd', sdkVersion: '26.99.0-unknown'});
-  runtime.publishSdk();
-  runtime.run(`globalThis.sdkInput = ${JSON.stringify(makeSdkOptions())}; globalThis.sdkMarker = {marker: "sdk"};`);
-  await runtime.run("new globalThis['playback-service'].PlaybackService().createPlaybackSession(sdkInput, sdkMarker)");
-  assert.equal(runtime.sdkCalls[0].args[0], runtime.context.sdkInput, 'an unverified service SDK is not rewritten');
-  await assert.rejects(
-    runtime.run(`fetch(${JSON.stringify(PLAYBACK_URL)}, {method:'POST', body:${JSON.stringify(makePlaybackBody())}})`),
-    (error) => error.name === 'AbortError', 'an unverified service SDK still blocks the full-HD playback POST');
+  const control = runtime.context.__DisneyPlusEdgeEnhancedToolbar;
+  await publishAndCreate(runtime);
+  const hive = runtime.sdkCalls[0].args[0].clientParameters.configOverrides['hive-dmp'];
+  assert.equal(hive.session.vod.playlistFiltering.maxHeight, 1080,
+    'an unverified service SDK receives the full-HD override optimistically');
+  await sendPlayback(runtime);
+  await fetchMasterAndMedia(runtime);
+  await prepareSession(runtime);
+  assert.equal(control.getState().failed, false, 'full-HD completes on an unverified service SDK');
+  assert.equal(runtime.context.localStorage.getItem('ioridev.disneyplus4k.fhd-sdk-denied.v1'), null,
+    'a successful unverified SDK version is not recorded in the deny list');
 }
 
 console.log('Normal full-HD: no duration cap, repeated SDK/POST/master and native key updates, fatal error disarm, page retirement, BFCache and SDK 26.13.3 acceptance passed (mock only).');
